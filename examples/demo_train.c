@@ -2,13 +2,14 @@
 #include <stdlib.h>
 #include <math.h>
 #include "minitorch/core/autograd.h"
+#include "minitorch/data/dataset.h"
 #include "minitorch/nn/nn.h"
 #include "minitorch/optim/optim.h"
 
 #define MAX_SAMPLES 64
 #define MAX_FEATURES 8
 
-static float X[MAX_SAMPLES][MAX_FEATURES];
+static float X[MAX_SAMPLES * MAX_FEATURES];
 static float Y[MAX_SAMPLES];
 static int n_samples = 0;
 static int n_features = 0;
@@ -42,7 +43,7 @@ static void input_dataset(void) {
         printf("\nExemple %d\n", i + 1);
         for (int f = 0; f < n_features; f++) {
             printf("  x%d = ", f + 1);
-            scanf("%f", &X[i][f]);
+            scanf("%f", &X[i * n_features + f]);
         }
         float label = 0.0f;
         do {
@@ -62,38 +63,44 @@ static void print_dataset(void) {
         printf("  exemple %d : [", i + 1);
         for (int f = 0; f < n_features; f++) {
             if (f > 0) printf(", ");
-            printf("%.2f", X[i][f]);
+            printf("%.2f", X[i * n_features + f]);
         }
         printf("] -> y=%.1f\n", Y[i]);
     }
 }
 
-static float predict_raw(AgTape* tape, const MtLinear* model, int idx) {
+static float predict_raw(AgTape* tape, const MtLinear* model, const MtDataset* dataset, int idx) {
     float z = ag_data(tape, mt_linear_bias(model, 0));
     for (int f = 0; f < n_features; f++) {
-        z += X[idx][f] * ag_data(tape, mt_linear_weight(model, 0, f));
+        z += mt_dataset_feature(dataset, idx, f) * ag_data(tape, mt_linear_weight(model, 0, f));
     }
     return z;
 }
 
-static float predict_prob(AgTape* tape, const MtLinear* model, int idx) {
-    float z = predict_raw(tape, model, idx);
+static float predict_prob(AgTape* tape, const MtLinear* model, const MtDataset* dataset, int idx) {
+    float z = predict_raw(tape, model, dataset, idx);
     return 1.0f / (1.0f + expf(-z));
 }
 
-static float train_sample(AgTape* tape, MtLinear* model, MtOptimizer* optim, int idx) {
+static float train_batch(AgTape* tape, MtLinear* model, MtOptimizer* optim, const MtBatch* batch, int count) {
+    AgVal pred[MAX_SAMPLES];
+    AgVal target[MAX_SAMPLES];
     AgVal features[MAX_FEATURES];
-    for (int f = 0; f < n_features; f++) {
-        features[f] = ag_leaf(tape, X[idx][f]);
+    AgVal logits[1];
+
+    for (int i = 0; i < count; i++) {
+        for (int f = 0; f < n_features; f++) {
+            features[f] = ag_leaf(tape, mt_batch_feature(batch, i, f));
+        }
+
+        AgVal prob[1];
+        mt_linear_forward(tape, model, features, logits);
+        mt_sigmoid(tape, logits, 1, prob);
+        pred[i] = prob[0];
+        target[i] = ag_leaf(tape, mt_batch_label(batch, i));
     }
 
-    AgVal logits[1];
-    AgVal pred[1];
-    AgVal target[1] = {ag_leaf(tape, Y[idx])};
-
-    mt_linear_forward(tape, model, features, logits);
-    mt_sigmoid(tape, logits, 1, pred);
-    AgVal loss = mt_bce_loss(tape, pred, target, 1);
+    AgVal loss = mt_bce_loss(tape, pred, target, count);
 
     float loss_value = ag_data(tape, loss);
     mt_optimizer_zero_grad(tape, optim);
@@ -102,9 +109,10 @@ static float train_sample(AgTape* tape, MtLinear* model, MtOptimizer* optim, int
     return loss_value;
 }
 
-static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, int epochs) {
+static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, MtDataset* dataset, MtBatch* batch, int batch_size, int epochs) {
     printf("\nEntraînement de la régression logistique\n");
     printf("Modèle : Linear(%d, 1) + Sigmoid + BCE + Adam\n", n_features);
+    printf("Batch : %d exemple(s)\n", batch_size);
     printf("Époque   Perte moy.\n");
     printf("-----------------\n");
 
@@ -113,32 +121,41 @@ static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, int epochs)
 
     for (int epoch = 1; epoch <= epochs; epoch++) {
         float total_loss = 0.0f;
+        int seen = 0;
+        int n_batches = mt_dataset_num_batches(dataset, batch_size);
 
-        for (int i = 0; i < n_samples; i++) {
-            float loss = train_sample(tape, model, optim, i);
-            total_loss += loss;
+        mt_dataset_shuffle(dataset);
+        for (int batch_idx = 0; batch_idx < n_batches; batch_idx++) {
+            int count = mt_dataset_get_batch(dataset, batch_idx, batch_size, batch);
+            if (count <= 0) {
+                continue;
+            }
+            float loss = train_batch(tape, model, optim, batch, count);
+            total_loss += loss * (float)count;
+            seen += count;
         }
 
         if (epoch == 1 || epoch % print_every == 0 || epoch == epochs) {
-            printf("%-8d %.6f\n", epoch, total_loss / (float)n_samples);
+            printf("%-8d %.6f\n", epoch, total_loss / (float)seen);
         }
     }
 }
 
-static void print_results(AgTape* tape, const MtLinear* model, float threshold) {
+static void print_results(AgTape* tape, const MtLinear* model, const MtDataset* dataset, float threshold) {
     printf("\nPrédictions finales (seuil = %.2f)\n", threshold);
     printf("exemple  y_vrai   proba    classe\n");
     printf("--------------------------------\n");
 
     int correct = 0;
     for (int i = 0; i < n_samples; i++) {
-        float prob = predict_prob(tape, model, i);
+        float prob = predict_prob(tape, model, dataset, i);
         int pred = prob >= threshold ? 1 : 0;
-        int truth = Y[i] >= 0.5f ? 1 : 0;
+        float label = mt_dataset_label(dataset, i);
+        int truth = label >= 0.5f ? 1 : 0;
         if (pred == truth) {
             correct++;
         }
-        printf("%-8d %-8.1f %-8.4f %d\n", i + 1, Y[i], prob, pred);
+        printf("%-8d %-8.1f %-8.4f %d\n", i + 1, label, prob, pred);
     }
 
     printf("Précision : %d/%d\n", correct, n_samples);
@@ -152,12 +169,17 @@ int main(void) {
     print_dataset();
 
     int epochs = 0;
+    int batch_size = 1;
     float lr = 0.0f;
     float threshold = 0.5f;
 
     printf("\nHyperparamètres\n");
     printf("Époques : ");
     scanf("%d", &epochs);
+    printf("Taille de batch : ");
+    scanf("%d", &batch_size);
+    if (batch_size < 1) batch_size = 1;
+    if (batch_size > n_samples) batch_size = n_samples;
     printf("Taux d'apprentissage : ");
     scanf("%f", &lr);
     printf("Seuil de classification (par défaut 0.5) : ");
@@ -165,12 +187,16 @@ int main(void) {
 
     srand(42);
     AgTape* tape = ag_tape_create();
+    MtDataset* dataset = mt_dataset_create(X, Y, n_samples, n_features);
+    MtBatch* batch = mt_batch_create(batch_size, n_features);
     MtLinear* model = mt_linear_create(tape, n_features, 1, 1);
     MtOptimizer* optim = mt_adam_create(lr, 0.9f, 0.999f, 1e-8f);
-    if (!tape || !model || !optim) {
+    if (!tape || !dataset || !batch || !model || !optim) {
         printf("Impossible de créer le modèle nn.\n");
         mt_optimizer_free(optim);
         mt_linear_free(model);
+        mt_batch_free(batch);
+        mt_dataset_free(dataset);
         ag_tape_free(tape);
         return 1;
     }
@@ -183,7 +209,7 @@ int main(void) {
     }
     printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
-    train(tape, model, optim, epochs);
+    train(tape, model, optim, dataset, batch, batch_size, epochs);
 
     printf("\nPoids entraînés\n");
     for (int f = 0; f < n_features; f++) {
@@ -191,9 +217,11 @@ int main(void) {
     }
     printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
-    print_results(tape, model, threshold);
+    print_results(tape, model, dataset, threshold);
     mt_optimizer_free(optim);
     mt_linear_free(model);
+    mt_batch_free(batch);
+    mt_dataset_free(dataset);
     ag_tape_free(tape);
     return 0;
 }

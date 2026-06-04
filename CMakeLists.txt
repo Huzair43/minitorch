@@ -62,3 +62,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_optim.c")
     target_link_libraries(test_optim minitorch m)
     add_test(NAME OptimUnitTests COMMAND test_optim)
 endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_data.c")
+    add_executable(test_data tests/test_data.c)
+    target_include_directories(test_data PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(test_data minitorch m)
+    add_test(NAME DataUnitTests COMMAND test_data)
+endif()
