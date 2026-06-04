@@ -12,6 +12,7 @@
 #include "minitorch/core/autograd.h"
 #include "minitorch/nn/nn.h"
 #include "minitorch/optim/optim.h"
+#include "minitorch/serialization/serialization.h"
 
 static void configure_console(void) {
 #ifdef _WIN32
@@ -297,6 +298,55 @@ static void demo_optim_module(void) {
     ag_tape_free(tape);
 }
 
+static void demo_serialization_module(void) {
+    print_title("Sauvegarde modèle");
+
+    AgTape* tape = ag_tape_create();
+    MtLinear* linear = mt_linear_create(tape, 2, 1, 1);
+    if (!tape || !linear) {
+        printf("Impossible de créer la couche Linear.\n");
+        mt_linear_free(linear);
+        ag_tape_free(tape);
+        return;
+    }
+
+    mt_linear_set_weight(tape, linear, 0, 0, 1.25f);
+    mt_linear_set_weight(tape, linear, 0, 1, -0.75f);
+    mt_linear_set_bias(tape, linear, 0, 0.50f);
+
+    printf("Avant sauvegarde : w0=%.2f, w1=%.2f, b=%.2f\n",
+           ag_data(tape, mt_linear_weight(linear, 0, 0)),
+           ag_data(tape, mt_linear_weight(linear, 0, 1)),
+           ag_data(tape, mt_linear_bias(linear, 0)));
+
+    if (!mt_save_linear(tape, linear, "linear_demo.mt")) {
+        printf("Sauvegarde échouée.\n");
+        mt_linear_free(linear);
+        ag_tape_free(tape);
+        return;
+    }
+
+    mt_linear_set_weight(tape, linear, 0, 0, 0.0f);
+    mt_linear_set_weight(tape, linear, 0, 1, 0.0f);
+    mt_linear_set_bias(tape, linear, 0, 0.0f);
+
+    if (!mt_load_linear(tape, linear, "linear_demo.mt")) {
+        printf("Chargement échoué.\n");
+        mt_linear_free(linear);
+        ag_tape_free(tape);
+        return;
+    }
+
+    printf("Après chargement : w0=%.2f, w1=%.2f, b=%.2f\n",
+           ag_data(tape, mt_linear_weight(linear, 0, 0)),
+           ag_data(tape, mt_linear_weight(linear, 0, 1)),
+           ag_data(tape, mt_linear_bias(linear, 0)));
+    printf("Fichier créé : linear_demo.mt\n");
+
+    mt_linear_free(linear);
+    ag_tape_free(tape);
+}
+
 static void print_menu(void) {
     printf("\nMenu de démo MiniTorch\n");
     printf("1. Bases des tenseurs\n");
@@ -306,6 +356,7 @@ static void print_menu(void) {
     printf("5. Aides autograd tensorielles\n");
     printf("6. Module nn\n");
     printf("7. Module optim\n");
+    printf("8. Sauvegarde modèle\n");
     printf("0. Quitter\n");
     printf("Choix : ");
 }
@@ -329,6 +380,7 @@ int main(void) {
             case 5: demo_tensor_autograd(); break;
             case 6: demo_nn_module(); break;
             case 7: demo_optim_module(); break;
+            case 8: demo_serialization_module(); break;
             case 0:
                 printf("Au revoir\n");
                 return 0;

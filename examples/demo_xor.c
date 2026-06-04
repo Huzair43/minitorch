@@ -3,6 +3,7 @@
 #include "minitorch/data/dataset.h"
 #include "minitorch/nn/nn.h"
 #include "minitorch/optim/optim.h"
+#include "minitorch/serialization/serialization.h"
 
 #define XOR_SAMPLES 4
 #define XOR_FEATURES 2
@@ -176,6 +177,12 @@ int main(void) {
     }
 
     print_predictions(tape, model, graph_checkpoint, dataset);
+
+    if (mt_save_sequential(tape, model, "xor_model.mt")) {
+        printf("\nModèle sauvegardé dans xor_model.mt\n");
+    } else {
+        printf("\nImpossible de sauvegarder le modèle XOR.\n");
+    }
 
     mt_optimizer_free(optim);
     mt_sequential_free(model);

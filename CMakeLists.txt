@@ -86,3 +86,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_xor.c")
     target_link_libraries(test_xor minitorch m)
     add_test(NAME XORTrainingTests COMMAND test_xor)
 endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_serialization.c")
+    add_executable(test_serialization tests/test_serialization.c)
+    target_include_directories(test_serialization PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(test_serialization minitorch m)
+    add_test(NAME SerializationUnitTests COMMAND test_serialization)
+endif()
