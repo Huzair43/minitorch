@@ -75,6 +75,28 @@ void mt_linear_init_uniform(AgTape *t, MtLinear *layer, float lo, float hi) {
     }
 }
 
+void mt_linear_init_zeros(AgTape *t, MtLinear *layer) {
+    mt_linear_init_uniform(t, layer, 0.0f, 0.0f);
+}
+
+void mt_linear_init_xavier_uniform(AgTape *t, MtLinear *layer) {
+    if (!t || !layer || layer->in_features <= 0 || layer->out_features <= 0) {
+        return;
+    }
+
+    float limit = sqrtf(6.0f / (float)(layer->in_features + layer->out_features));
+    mt_linear_init_uniform(t, layer, -limit, limit);
+}
+
+void mt_linear_init_he_uniform(AgTape *t, MtLinear *layer) {
+    if (!t || !layer || layer->in_features <= 0) {
+        return;
+    }
+
+    float limit = sqrtf(6.0f / (float)layer->in_features);
+    mt_linear_init_uniform(t, layer, -limit, limit);
+}
+
 void mt_linear_set_weight(AgTape *t, MtLinear *layer, int out_idx, int in_idx, float value) {
     if (!t || !layer || !layer->weight) {
         return;

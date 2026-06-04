@@ -11,17 +11,7 @@
 #define N_CLASSES 3
 
 static void init_model(AgTape* tape, MtLinear* model) {
-    mt_linear_set_weight(tape, model, 0, 0, -0.5f);
-    mt_linear_set_weight(tape, model, 0, 1, -0.5f);
-    mt_linear_set_bias(tape, model, 0, 0.0f);
-
-    mt_linear_set_weight(tape, model, 1, 0, 0.5f);
-    mt_linear_set_weight(tape, model, 1, 1, 0.0f);
-    mt_linear_set_bias(tape, model, 1, 0.0f);
-
-    mt_linear_set_weight(tape, model, 2, 0, 0.0f);
-    mt_linear_set_weight(tape, model, 2, 1, 0.5f);
-    mt_linear_set_bias(tape, model, 2, 0.0f);
+    mt_linear_init_xavier_uniform(tape, model);
 }
 
 static float train_batch(AgTape* tape,

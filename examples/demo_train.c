@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include "minitorch/core/autograd.h"
 #include "minitorch/data/dataset.h"
 #include "minitorch/nn/nn.h"
@@ -14,16 +13,8 @@ static float Y[MAX_SAMPLES];
 static int n_samples = 0;
 static int n_features = 0;
 
-static float randf(float lo, float hi) {
-    return lo + (hi - lo) * ((float)rand() / (float)RAND_MAX);
-}
-
 static void init_model(AgTape* tape, MtLinear* model) {
-    float scale = sqrtf(2.0f / (float)n_features);
-    for (int i = 0; i < n_features; i++) {
-        mt_linear_set_weight(tape, model, 0, i, randf(-scale, scale));
-    }
-    mt_linear_set_bias(tape, model, 0, 0.0f);
+    mt_linear_init_xavier_uniform(tape, model);
 }
 
 static void input_dataset(void) {

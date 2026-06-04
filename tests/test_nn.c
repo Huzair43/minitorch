@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 #include "minitorch/core/autograd.h"
 #include "minitorch/nn/nn.h"
 
@@ -126,6 +127,85 @@ static void test_bce_loss(void) {
     ag_tape_free(t);
 }
 
+static void test_linear_init_zeros(void) {
+    section("Linear : initialisation zeros");
+
+    AgTape *t = ag_tape_create();
+    MtLinear *linear = mt_linear_create(t, 2, 2, 1);
+
+    mt_linear_set_weight(t, linear, 0, 0, 2.0f);
+    mt_linear_set_weight(t, linear, 0, 1, -3.0f);
+    mt_linear_set_weight(t, linear, 1, 0, 4.0f);
+    mt_linear_set_weight(t, linear, 1, 1, -5.0f);
+    mt_linear_set_bias(t, linear, 0, 1.0f);
+    mt_linear_set_bias(t, linear, 1, -1.0f);
+
+    mt_linear_init_zeros(t, linear);
+
+    int ok = 1;
+    for (int out = 0; out < 2; out++) {
+        for (int in = 0; in < 2; in++) {
+            if (ag_data(t, mt_linear_weight(linear, out, in)) != 0.0f) ok = 0;
+        }
+        if (ag_data(t, mt_linear_bias(linear, out)) != 0.0f) ok = 0;
+    }
+
+    CHECK("poids et biais a zero", (float)ok, 1.0f);
+
+    mt_linear_free(linear);
+    ag_tape_free(t);
+}
+
+static void test_linear_init_xavier_uniform(void) {
+    section("Linear : initialisation Xavier uniform");
+
+    AgTape *t = ag_tape_create();
+    MtLinear *linear = mt_linear_create(t, 3, 2, 1);
+
+    srand(1);
+    mt_linear_init_xavier_uniform(t, linear);
+
+    float limit = sqrtf(6.0f / 5.0f);
+    int ok = 1;
+    for (int out = 0; out < 2; out++) {
+        for (int in = 0; in < 3; in++) {
+            float value = ag_data(t, mt_linear_weight(linear, out, in));
+            if (value < -limit || value > limit) ok = 0;
+        }
+        if (ag_data(t, mt_linear_bias(linear, out)) != 0.0f) ok = 0;
+    }
+
+    CHECK("poids dans bornes Xavier", (float)ok, 1.0f);
+
+    mt_linear_free(linear);
+    ag_tape_free(t);
+}
+
+static void test_linear_init_he_uniform(void) {
+    section("Linear : initialisation He uniform");
+
+    AgTape *t = ag_tape_create();
+    MtLinear *linear = mt_linear_create(t, 4, 3, 1);
+
+    srand(2);
+    mt_linear_init_he_uniform(t, linear);
+
+    float limit = sqrtf(6.0f / 4.0f);
+    int ok = 1;
+    for (int out = 0; out < 3; out++) {
+        for (int in = 0; in < 4; in++) {
+            float value = ag_data(t, mt_linear_weight(linear, out, in));
+            if (value < -limit || value > limit) ok = 0;
+        }
+        if (ag_data(t, mt_linear_bias(linear, out)) != 0.0f) ok = 0;
+    }
+
+    CHECK("poids dans bornes He", (float)ok, 1.0f);
+
+    mt_linear_free(linear);
+    ag_tape_free(t);
+}
+
 int main(void) {
     printf("test_nn : suite complete\n");
 
@@ -133,6 +213,9 @@ int main(void) {
     test_linear_step();
     test_sequential_sigmoid();
     test_bce_loss();
+    test_linear_init_zeros();
+    test_linear_init_xavier_uniform();
+    test_linear_init_he_uniform();
 
     summary();
     return _failed == 0 ? 0 : 1;

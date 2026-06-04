@@ -80,6 +80,7 @@ Le module `nn` ajoute des briques de réseau:
 - `BCELoss`
 - `CrossEntropyLoss`
 - `CrossEntropyFromLogits`
+- initialisations `zeros`, `Xavier uniform` et `He uniform`
 
 Exemple simple:
 
@@ -347,7 +348,7 @@ MiniTorch reste volontairement simple. Il manque encore plusieurs éléments imp
 - broadcasting général dans tous les gradients
 - softmax avec stabilité numérique renforcée pour les très grands logits
 - vraie API de module plus proche de PyTorch
-- initialisations Xavier et He
+- initialisations plus nombreuses
 - séparation train/test
 - chargement de datasets depuis fichiers
 - sauvegarde plus robuste avec versionnement plus strict
@@ -357,31 +358,27 @@ MiniTorch reste volontairement simple. Il manque encore plusieurs éléments imp
 
 Les prochaines étapes possibles:
 
-1. Ajouter des initialisations de poids propres:
-   - Xavier
-   - He
-
-2. Ajouter un vrai split de dataset:
+1. Ajouter un vrai split de dataset:
    - train
    - validation
    - test
 
-3. Ajouter des métriques:
+2. Ajouter des métriques:
    - accuracy
    - loss moyenne
    - matrice de confusion simple
 
-4. Ajouter une API d'évaluation:
+3. Ajouter une API d'évaluation:
    - évaluer un modèle sans entraîner
    - afficher les prédictions
    - comparer train et validation
 
-5. Nettoyer l'API publique:
+4. Nettoyer l'API publique:
    - noms plus cohérents
    - erreurs mieux signalées
    - documentation par fonction
 
-6. Rendre l'autograd plus tensoriel:
+5. Rendre l'autograd plus tensoriel:
    - gradients de `matmul`
    - gradients de `sum`
    - gradients de broadcasting

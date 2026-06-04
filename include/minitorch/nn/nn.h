@@ -43,6 +43,9 @@ typedef struct {
 MtLinear *mt_linear_create(AgTape *t, int in_features, int out_features, int use_bias);
 void      mt_linear_free(MtLinear *layer);
 void      mt_linear_init_uniform(AgTape *t, MtLinear *layer, float lo, float hi);
+void      mt_linear_init_zeros(AgTape *t, MtLinear *layer);
+void      mt_linear_init_xavier_uniform(AgTape *t, MtLinear *layer);
+void      mt_linear_init_he_uniform(AgTape *t, MtLinear *layer);
 void      mt_linear_set_weight(AgTape *t, MtLinear *layer, int out_idx, int in_idx, float value);
 void      mt_linear_set_bias(AgTape *t, MtLinear *layer, int out_idx, float value);
 AgVal     mt_linear_weight(const MtLinear *layer, int out_idx, int in_idx);
