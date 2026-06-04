@@ -10,6 +10,7 @@
 #include "minitorch/core/tensor_ops.h"
 #include "minitorch/core/tensor_linalg.h"
 #include "minitorch/core/autograd.h"
+#include "minitorch/nn/nn.h"
 
 static void configure_console(void) {
 #ifdef _WIN32
@@ -94,9 +95,9 @@ static void demo_broadcast_and_reduce(void) {
     print_tensor_2d(bias_broadcast);
     printf("Matrice + biais :\n");
     print_tensor_2d(shifted);
-    printf("Row sums (axis=1):\n");
+    printf("Sommes par ligne (axe=1) :\n");
     tensor_print(row_sum);
-    printf("Column means (axis=0):\n");
+    printf("Moyennes par colonne (axe=0) :\n");
     tensor_print(col_mean);
 
     tensor_free(matrix);
@@ -132,7 +133,7 @@ static void demo_linalg(void) {
     print_tensor_2d(b);
     printf("A @ B:\n");
     print_tensor_2d(c);
-    printf("transpose(A):\n");
+    printf("transposée(A) :\n");
     print_tensor_2d(at);
     printf("det(A) = %.3f\n", det);
 
@@ -184,7 +185,7 @@ static void demo_tensor_autograd(void) {
 
     ag_tensor_broadcast_binary_2d(tape, x, 2, 3, bias, 1, 3, shifted, ag_add);
 
-    printf("X + bias:\n");
+    printf("X + biais :\n");
     for (int i = 0; i < 2; i++) {
         printf("[");
         for (int j = 0; j < 3; j++) {
@@ -206,6 +207,62 @@ static void demo_tensor_autograd(void) {
     ag_tape_free(tape);
 }
 
+static void demo_nn_module(void) {
+    print_title("Module nn");
+
+    AgTape* tape = ag_tape_create();
+    MtLinear* linear = mt_linear_create(tape, 2, 1, 1);
+    MtSequential* model = mt_sequential_create(2);
+    if (!tape || !linear || !model) {
+        printf("Impossible de créer le modèle nn.\n");
+        mt_sequential_free(model);
+        mt_linear_free(linear);
+        ag_tape_free(tape);
+        return;
+    }
+
+    mt_linear_set_weight(tape, linear, 0, 0, 0.25f);
+    mt_linear_set_weight(tape, linear, 0, 1, -0.50f);
+    mt_linear_set_bias(tape, linear, 0, 0.10f);
+
+    mt_sequential_add_linear(model, linear);
+    mt_sequential_add_activation(model, MT_ACT_SIGMOID);
+
+    AgVal input[2] = {
+        ag_leaf(tape, 1.0f),
+        ag_leaf(tape, -2.0f)
+    };
+    AgVal target[1] = {
+        ag_leaf(tape, 1.0f)
+    };
+    AgVal pred[1];
+
+    if (!mt_sequential_forward(tape, model, input, 2, pred, 1)) {
+        printf("Le passage forward du modèle a échoué.\n");
+        mt_sequential_free(model);
+        mt_linear_free(linear);
+        ag_tape_free(tape);
+        return;
+    }
+    AgVal loss = mt_bce_loss(tape, pred, target, 1);
+
+    printf("Modèle : Sequential(Linear(2, 1), Sigmoid)\n");
+    printf("Entrée : [1.0, -2.0]\n");
+    printf("Cible  : 1.0\n");
+    printf("Prédiction = %.4f\n", ag_data(tape, pred[0]));
+    printf("Perte BCE  = %.4f\n", ag_data(tape, loss));
+
+    ag_backward(tape, loss);
+    printf("Gradients de Linear :\n");
+    printf("  dL/dw0 = %.4f\n", ag_grad(tape, mt_linear_weight(linear, 0, 0)));
+    printf("  dL/dw1 = %.4f\n", ag_grad(tape, mt_linear_weight(linear, 0, 1)));
+    printf("  dL/db  = %.4f\n", ag_grad(tape, mt_linear_bias(linear, 0)));
+
+    mt_sequential_free(model);
+    mt_linear_free(linear);
+    ag_tape_free(tape);
+}
+
 static void print_menu(void) {
     printf("\nMenu de démo MiniTorch\n");
     printf("1. Bases des tenseurs\n");
@@ -213,7 +270,8 @@ static void print_menu(void) {
     printf("3. Algèbre linéaire\n");
     printf("4. Chaîne autograd scalaire\n");
     printf("5. Aides autograd tensorielles\n");
-    printf("0. Quit\n");
+    printf("6. Module nn\n");
+    printf("0. Quitter\n");
     printf("Choix : ");
 }
 
@@ -234,6 +292,7 @@ int main(void) {
             case 3: demo_linalg(); break;
             case 4: demo_scalar_autograd(); break;
             case 5: demo_tensor_autograd(); break;
+            case 6: demo_nn_module(); break;
             case 0:
                 printf("Au revoir\n");
                 return 0;

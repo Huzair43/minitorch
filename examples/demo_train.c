@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "minitorch/core/autograd.h"
+#include "minitorch/nn/nn.h"
 
 #define MAX_SAMPLES 64
 #define MAX_FEATURES 8
@@ -11,19 +12,16 @@ static float Y[MAX_SAMPLES];
 static int n_samples = 0;
 static int n_features = 0;
 
-static float W[MAX_FEATURES];
-static float B = 0.0f;
-
 static float randf(float lo, float hi) {
     return lo + (hi - lo) * ((float)rand() / (float)RAND_MAX);
 }
 
-static void init_model(void) {
+static void init_model(AgTape* tape, MtLinear* model) {
     float scale = sqrtf(2.0f / (float)n_features);
     for (int i = 0; i < n_features; i++) {
-        W[i] = randf(-scale, scale);
+        mt_linear_set_weight(tape, model, 0, i, randf(-scale, scale));
     }
-    B = 0.0f;
+    mt_linear_set_bias(tape, model, 0, 0.0f);
 }
 
 static void input_dataset(void) {
@@ -40,7 +38,7 @@ static void input_dataset(void) {
 
     printf("\nEntrez une étiquette binaire y dans [0, 1].\n");
     for (int i = 0; i < n_samples; i++) {
-        printf("\nSample %d\n", i + 1);
+        printf("\nExemple %d\n", i + 1);
         for (int f = 0; f < n_features; f++) {
             printf("  x%d = ", f + 1);
             scanf("%f", &X[i][f]);
@@ -69,65 +67,43 @@ static void print_dataset(void) {
     }
 }
 
-static float predict_raw(int idx) {
-    float z = B;
+static float predict_raw(AgTape* tape, const MtLinear* model, int idx) {
+    float z = ag_data(tape, mt_linear_bias(model, 0));
     for (int f = 0; f < n_features; f++) {
-        z += X[idx][f] * W[f];
+        z += X[idx][f] * ag_data(tape, mt_linear_weight(model, 0, f));
     }
     return z;
 }
 
-static float predict_prob(int idx) {
-    float z = predict_raw(idx);
+static float predict_prob(AgTape* tape, const MtLinear* model, int idx) {
+    float z = predict_raw(tape, model, idx);
     return 1.0f / (1.0f + expf(-z));
 }
 
-static float forward_backward_sample(int idx, float* dW, float* dB) {
-    AgTape* tape = ag_tape_create();
-
+static float train_sample(AgTape* tape, MtLinear* model, int idx, float lr) {
     AgVal features[MAX_FEATURES];
-    AgVal weights[MAX_FEATURES];
     for (int f = 0; f < n_features; f++) {
         features[f] = ag_leaf(tape, X[idx][f]);
-        weights[f] = ag_leaf(tape, W[f]);
     }
 
-    AgVal bias = ag_leaf(tape, B);
-    AgVal z = bias;
-    for (int f = 0; f < n_features; f++) {
-        z = ag_add(tape, z, ag_mul(tape, features[f], weights[f]));
-    }
+    AgVal logits[1];
+    AgVal pred[1];
+    AgVal target[1] = {ag_leaf(tape, Y[idx])};
 
-    AgVal y_hat = ag_sigmoid(tape, z);
-    AgVal target = ag_leaf(tape, Y[idx]);
-    AgVal one = ag_leaf(tape, 1.0f);
-    AgVal eps = ag_leaf(tape, 1e-7f);
-    AgVal loss = ag_neg(tape,
-        ag_add(tape,
-            ag_mul(tape, target, ag_log(tape, ag_add(tape, y_hat, eps))),
-            ag_mul(tape, ag_sub(tape, one, target),
-                          ag_log(tape, ag_add(tape, ag_sub(tape, one, y_hat), eps)))
-        )
-    );
+    mt_linear_forward(tape, model, features, logits);
+    mt_sigmoid(tape, logits, 1, pred);
+    AgVal loss = mt_bce_loss(tape, pred, target, 1);
 
     float loss_value = ag_data(tape, loss);
+    ag_zero_grad(tape);
     ag_backward(tape, loss);
-
-    for (int f = 0; f < n_features; f++) {
-        dW[f] = ag_grad(tape, weights[f]);
-    }
-    *dB = ag_grad(tape, bias);
-
-    ag_tape_free(tape);
+    mt_linear_step(tape, model, lr);
     return loss_value;
 }
 
-static void train(int epochs, float lr) {
-    float dW[MAX_FEATURES];
-    float dB = 0.0f;
-
+static void train(AgTape* tape, MtLinear* model, int epochs, float lr) {
     printf("\nEntraînement de la régression logistique\n");
-    printf("Modèle : y_hat = sigmoid(sum(x_i * w_i) + b)\n");
+    printf("Modèle : Linear(%d, 1) + Sigmoid + BCE\n", n_features);
     printf("Époque   Perte moy.\n");
     printf("-----------------\n");
 
@@ -138,13 +114,8 @@ static void train(int epochs, float lr) {
         float total_loss = 0.0f;
 
         for (int i = 0; i < n_samples; i++) {
-            float loss = forward_backward_sample(i, dW, &dB);
+            float loss = train_sample(tape, model, i, lr);
             total_loss += loss;
-
-            for (int f = 0; f < n_features; f++) {
-                W[f] -= lr * dW[f];
-            }
-            B -= lr * dB;
         }
 
         if (epoch == 1 || epoch % print_every == 0 || epoch == epochs) {
@@ -153,14 +124,14 @@ static void train(int epochs, float lr) {
     }
 }
 
-static void print_results(float threshold) {
+static void print_results(AgTape* tape, const MtLinear* model, float threshold) {
     printf("\nPrédictions finales (seuil = %.2f)\n", threshold);
-    printf("exemple  y_vrai   proba    pred\n");
+    printf("exemple  y_vrai   proba    classe\n");
     printf("--------------------------------\n");
 
     int correct = 0;
     for (int i = 0; i < n_samples; i++) {
-        float prob = predict_prob(i);
+        float prob = predict_prob(tape, model, i);
         int pred = prob >= threshold ? 1 : 0;
         int truth = Y[i] >= 0.5f ? 1 : 0;
         if (pred == truth) {
@@ -192,22 +163,32 @@ int main(void) {
     scanf("%f", &threshold);
 
     srand(42);
-    init_model();
-
-    printf("\nInitial weights\n");
-    for (int f = 0; f < n_features; f++) {
-        printf("  w%d = %.4f\n", f + 1, W[f]);
+    AgTape* tape = ag_tape_create();
+    MtLinear* model = mt_linear_create(tape, n_features, 1, 1);
+    if (!tape || !model) {
+        printf("Impossible de créer le modèle nn.\n");
+        mt_linear_free(model);
+        ag_tape_free(tape);
+        return 1;
     }
-    printf("  b  = %.4f\n", B);
+    init_model(tape, model);
 
-    train(epochs, lr);
-
-    printf("\nTrained weights\n");
+    printf("\nPoids initiaux\n");
     for (int f = 0; f < n_features; f++) {
-        printf("  w%d = %.4f\n", f + 1, W[f]);
+        printf("  w%d = %.4f\n", f + 1, ag_data(tape, mt_linear_weight(model, 0, f)));
     }
-    printf("  b  = %.4f\n", B);
+    printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
-    print_results(threshold);
+    train(tape, model, epochs, lr);
+
+    printf("\nPoids entraînés\n");
+    for (int f = 0; f < n_features; f++) {
+        printf("  w%d = %.4f\n", f + 1, ag_data(tape, mt_linear_weight(model, 0, f)));
+    }
+    printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
+
+    print_results(tape, model, threshold);
+    mt_linear_free(model);
+    ag_tape_free(tape);
     return 0;
 }

@@ -42,3 +42,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_autograd.c")
     target_link_libraries(test_autograd minitorch m)
     add_test(NAME AutogradUnitTests COMMAND test_autograd)
 endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_nn.c")
+    add_executable(test_nn tests/test_nn.c)
+    target_include_directories(test_nn PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(test_nn minitorch m)
+    add_test(NAME NNUnitTests COMMAND test_nn)
+endif()
