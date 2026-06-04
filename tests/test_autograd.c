@@ -524,6 +524,35 @@ static void test_zero_grad(void) {
     ag_tape_free(t);
 }
 
+static void test_checkpoint_rewind(void) {
+    section("checkpoint/rewind : graphe temporaire libere");
+    AgTape *t = ag_tape_create();
+
+    AgVal w = ag_leaf(t, 2.0f);
+    int checkpoint = ag_checkpoint(t);
+    CHECK("checkpoint apres parametre", (float)checkpoint, 1.0f);
+
+    AgVal x1 = ag_leaf(t, 3.0f);
+    AgVal z1 = ag_mul(t, w, x1);
+    ag_backward(t, z1);
+    CHECK("avant rewind : z1 = 6", ag_data(t, z1), 6.0f);
+    CHECK("avant rewind : dz1/dw = 3", ag_grad(t, w), 3.0f);
+    CHECK("avant rewind : noeuds > checkpoint", ag_node_count(t) > checkpoint ? 1.0f : 0.0f, 1.0f);
+
+    ag_rewind(t, checkpoint);
+    CHECK("apres rewind : retour checkpoint", (float)ag_node_count(t), (float)checkpoint);
+    ag_set_data(t, w, 4.0f);
+    ag_zero_grad(t);
+
+    AgVal x2 = ag_leaf(t, 5.0f);
+    AgVal z2 = ag_mul(t, w, x2);
+    ag_backward(t, z2);
+    CHECK("apres rewind : z2 = 20", ag_data(t, z2), 20.0f);
+    CHECK("apres rewind : dz2/dw = 5", ag_grad(t, w), 5.0f);
+
+    ag_tape_free(t);
+}
+
 /* ════════════════════════════════════════════════════════
    MAIN
    ════════════════════════════════════════════════════════ */
@@ -564,6 +593,7 @@ int main(void) {
     /* memoire */
     test_tape_reset();
     test_zero_grad();
+    test_checkpoint_rewind();
 
     summary();
     return _failed > 0 ? 1 : 0;

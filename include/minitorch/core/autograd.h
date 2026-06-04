@@ -39,6 +39,12 @@ void    ag_tape_free(AgTape *t);
 void    ag_reset(AgTape *t);
 void    ag_zero_grad(AgTape *t);
 
+/* Marque puis restaure la fin des parametres persistants.
+   Utile pour liberer le graphe temporaire apres chaque batch. */
+int     ag_checkpoint(const AgTape *t);
+void    ag_rewind(AgTape *t, int checkpoint);
+int     ag_node_count(const AgTape *t);
+
 AgVal   ag_leaf(AgTape *t, float value);
 AgVal   ag_op(AgTape *t, AgBackwardFn fn, float result,
               const int *inputs, int n_inputs,

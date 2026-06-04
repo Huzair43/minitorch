@@ -30,7 +30,9 @@ static void init_xor_model(AgTape* tape, MtLinear* l1, MtLinear* l2) {
     mt_linear_set_bias(tape, l2, 0, -1.5f);
 }
 
-static float forward_prob(AgTape* tape, const MtSequential* model, float x0, float x1) {
+static float forward_prob(AgTape* tape, const MtSequential* model, int graph_checkpoint, float x0, float x1) {
+    ag_rewind(tape, graph_checkpoint);
+
     AgVal input[2] = {
         ag_leaf(tape, x0),
         ag_leaf(tape, x1)
@@ -46,8 +48,11 @@ static float forward_prob(AgTape* tape, const MtSequential* model, float x0, flo
 static float train_batch(AgTape* tape,
                          MtSequential* model,
                          MtOptimizer* optim,
+                         int graph_checkpoint,
                          const MtBatch* batch,
                          int count) {
+    ag_rewind(tape, graph_checkpoint);
+
     AgVal pred[XOR_SAMPLES];
     AgVal target[XOR_SAMPLES];
 
@@ -73,7 +78,7 @@ static float train_batch(AgTape* tape,
     return value;
 }
 
-static void print_predictions(AgTape* tape, const MtSequential* model, const MtDataset* dataset) {
+static void print_predictions(AgTape* tape, const MtSequential* model, int graph_checkpoint, const MtDataset* dataset) {
     printf("\nPrédictions XOR\n");
     printf("x0  x1  y_vrai  proba   classe\n");
     printf("-------------------------------\n");
@@ -83,7 +88,7 @@ static void print_predictions(AgTape* tape, const MtSequential* model, const MtD
         float x0 = mt_dataset_feature(dataset, i, 0);
         float x1 = mt_dataset_feature(dataset, i, 1);
         float label = mt_dataset_label(dataset, i);
-        float prob = forward_prob(tape, model, x0, x1);
+        float prob = forward_prob(tape, model, graph_checkpoint, x0, x1);
         int pred = prob >= 0.5f ? 1 : 0;
         int truth = label >= 0.5f ? 1 : 0;
         if (pred == truth) {
@@ -151,6 +156,7 @@ int main(void) {
     mt_sequential_add_linear(model, l2);
     mt_sequential_add_activation(model, MT_ACT_SIGMOID);
     mt_optimizer_add_sequential(optim, model);
+    int graph_checkpoint = ag_checkpoint(tape);
 
     int print_every = epochs / 10;
     if (print_every < 1) print_every = 1;
@@ -162,14 +168,14 @@ int main(void) {
     for (int epoch = 1; epoch <= epochs; epoch++) {
         mt_dataset_shuffle(dataset);
         int count = mt_dataset_get_batch(dataset, 0, XOR_SAMPLES, batch);
-        float loss = train_batch(tape, model, optim, batch, count);
+        float loss = train_batch(tape, model, optim, graph_checkpoint, batch, count);
 
         if (epoch == 1 || epoch % print_every == 0 || epoch == epochs) {
             printf("%-8d %.6f\n", epoch, loss);
         }
     }
 
-    print_predictions(tape, model, dataset);
+    print_predictions(tape, model, graph_checkpoint, dataset);
 
     mt_optimizer_free(optim);
     mt_sequential_free(model);

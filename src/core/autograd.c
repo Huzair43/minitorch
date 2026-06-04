@@ -62,6 +62,26 @@ void ag_zero_grad(AgTape *t) {
         t->nodes[i].grad = 0.0f;
 }
 
+int ag_checkpoint(const AgTape *t) {
+    if (!t) return 0;
+    return t->n;
+}
+
+void ag_rewind(AgTape *t, int checkpoint) {
+    if (!t || checkpoint < 0 || checkpoint > t->n) return;
+
+    for (int i = checkpoint; i < t->n; i++) {
+        memset(&t->nodes[i], 0, sizeof(AgNode));
+        memset(&t->entries[i], 0, sizeof(AgEntry));
+    }
+    t->n = checkpoint;
+}
+
+int ag_node_count(const AgTape *t) {
+    if (!t) return 0;
+    return t->n;
+}
+
 /* ════════════════════════════════════════════════════════
    ACCESSEURS
    ════════════════════════════════════════════════════════ */

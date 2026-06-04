@@ -49,7 +49,9 @@ static void init_xor_model(AgTape* tape, MtLinear* l1, MtLinear* l2) {
     mt_linear_set_bias(tape, l2, 0, -1.5f);
 }
 
-static float eval_prob(AgTape* tape, const MtSequential* model, const MtDataset* dataset, int idx) {
+static float eval_prob(AgTape* tape, const MtSequential* model, int graph_checkpoint, const MtDataset* dataset, int idx) {
+    ag_rewind(tape, graph_checkpoint);
+
     AgVal input[2] = {
         ag_leaf(tape, mt_dataset_feature(dataset, idx, 0)),
         ag_leaf(tape, mt_dataset_feature(dataset, idx, 1))
@@ -62,8 +64,11 @@ static float eval_prob(AgTape* tape, const MtSequential* model, const MtDataset*
 static float train_epoch(AgTape* tape,
                          MtSequential* model,
                          MtOptimizer* optim,
+                         int graph_checkpoint,
                          MtDataset* dataset,
                          MtBatch* batch) {
+    ag_rewind(tape, graph_checkpoint);
+
     AgVal pred[XOR_SAMPLES];
     AgVal target[XOR_SAMPLES];
 
@@ -130,18 +135,19 @@ static void test_mlp_learns_xor(void) {
     mt_sequential_add_linear(model, l2);
     mt_sequential_add_activation(model, MT_ACT_SIGMOID);
     mt_optimizer_add_sequential(optim, model);
+    int graph_checkpoint = ag_checkpoint(tape);
 
-    float first_loss = train_epoch(tape, model, optim, dataset, batch);
+    float first_loss = train_epoch(tape, model, optim, graph_checkpoint, dataset, batch);
     float last_loss = first_loss;
     for (int epoch = 2; epoch <= 100; epoch++) {
-        last_loss = train_epoch(tape, model, optim, dataset, batch);
+        last_loss = train_epoch(tape, model, optim, graph_checkpoint, dataset, batch);
     }
 
     CHECK("la perte baisse", last_loss < first_loss ? 1.0f : 0.0f, 1.0f);
 
     int correct = 0;
     for (int i = 0; i < XOR_SAMPLES; i++) {
-        float prob = eval_prob(tape, model, dataset, i);
+        float prob = eval_prob(tape, model, graph_checkpoint, dataset, i);
         int pred = prob >= 0.5f ? 1 : 0;
         int truth = mt_dataset_label(dataset, i) >= 0.5f ? 1 : 0;
         if (pred == truth) {

@@ -82,7 +82,9 @@ static float predict_prob(AgTape* tape, const MtLinear* model, const MtDataset* 
     return 1.0f / (1.0f + expf(-z));
 }
 
-static float train_batch(AgTape* tape, MtLinear* model, MtOptimizer* optim, const MtBatch* batch, int count) {
+static float train_batch(AgTape* tape, MtLinear* model, MtOptimizer* optim, int graph_checkpoint, const MtBatch* batch, int count) {
+    ag_rewind(tape, graph_checkpoint);
+
     AgVal pred[MAX_SAMPLES];
     AgVal target[MAX_SAMPLES];
     AgVal features[MAX_FEATURES];
@@ -109,7 +111,7 @@ static float train_batch(AgTape* tape, MtLinear* model, MtOptimizer* optim, cons
     return loss_value;
 }
 
-static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, MtDataset* dataset, MtBatch* batch, int batch_size, int epochs) {
+static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, int graph_checkpoint, MtDataset* dataset, MtBatch* batch, int batch_size, int epochs) {
     printf("\nEntraînement de la régression logistique\n");
     printf("Modèle : Linear(%d, 1) + Sigmoid + BCE + Adam\n", n_features);
     printf("Batch : %d exemple(s)\n", batch_size);
@@ -130,7 +132,7 @@ static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, MtDataset* 
             if (count <= 0) {
                 continue;
             }
-            float loss = train_batch(tape, model, optim, batch, count);
+            float loss = train_batch(tape, model, optim, graph_checkpoint, batch, count);
             total_loss += loss * (float)count;
             seen += count;
         }
@@ -202,6 +204,7 @@ int main(void) {
     }
     init_model(tape, model);
     mt_optimizer_add_linear(optim, model);
+    int graph_checkpoint = ag_checkpoint(tape);
 
     printf("\nPoids initiaux\n");
     for (int f = 0; f < n_features; f++) {
@@ -209,7 +212,7 @@ int main(void) {
     }
     printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
-    train(tape, model, optim, dataset, batch, batch_size, epochs);
+    train(tape, model, optim, graph_checkpoint, dataset, batch, batch_size, epochs);
 
     printf("\nPoids entraînés\n");
     for (int f = 0; f < n_features; f++) {
