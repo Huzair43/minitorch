@@ -24,6 +24,10 @@ add_executable(demo_xor examples/demo_xor.c)
 target_include_directories(demo_xor PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(demo_xor minitorch m)
 
+add_executable(demo_multiclass examples/demo_multiclass.c)
+target_include_directories(demo_multiclass PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(demo_multiclass minitorch m)
+
 # ── Tests ──────────────────────────────────────────────
 enable_testing()
 
@@ -95,4 +99,14 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_serialization.c")
     )
     target_link_libraries(test_serialization minitorch m)
     add_test(NAME SerializationUnitTests COMMAND test_serialization)
+endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_multiclass.c")
+    add_executable(test_multiclass tests/test_multiclass.c)
+    target_include_directories(test_multiclass PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(test_multiclass minitorch m)
+    add_test(NAME MulticlassUnitTests COMMAND test_multiclass)
 endif()

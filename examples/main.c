@@ -347,6 +347,44 @@ static void demo_serialization_module(void) {
     ag_tape_free(tape);
 }
 
+static void demo_multiclass_module(void) {
+    print_title("Softmax et CrossEntropy");
+
+    AgTape* tape = ag_tape_create();
+    if (!tape) {
+        printf("Impossible de créer le tape autograd.\n");
+        return;
+    }
+
+    AgVal logits[3] = {
+        ag_leaf(tape, 1.0f),
+        ag_leaf(tape, 2.0f),
+        ag_leaf(tape, 3.0f)
+    };
+    AgVal probs[3];
+    AgVal target[3] = {
+        ag_leaf(tape, 0.0f),
+        ag_leaf(tape, 0.0f),
+        ag_leaf(tape, 1.0f)
+    };
+
+    mt_softmax(tape, logits, 3, probs);
+    AgVal loss = mt_cross_entropy_loss(tape, probs, target, 3);
+
+    printf("Logits : [1.0, 2.0, 3.0]\n");
+    printf("Cible  : classe 2\n");
+    printf("Probas : [%.4f, %.4f, %.4f]\n",
+           ag_data(tape, probs[0]),
+           ag_data(tape, probs[1]),
+           ag_data(tape, probs[2]));
+    printf("Perte CrossEntropy = %.4f\n", ag_data(tape, loss));
+
+    ag_backward(tape, loss);
+    printf("Gradient du logit cible = %.4f\n", ag_grad(tape, logits[2]));
+
+    ag_tape_free(tape);
+}
+
 static void print_menu(void) {
     printf("\nMenu de démo MiniTorch\n");
     printf("1. Bases des tenseurs\n");
@@ -357,6 +395,7 @@ static void print_menu(void) {
     printf("6. Module nn\n");
     printf("7. Module optim\n");
     printf("8. Sauvegarde modèle\n");
+    printf("9. Softmax et CrossEntropy\n");
     printf("0. Quitter\n");
     printf("Choix : ");
 }
@@ -381,6 +420,7 @@ int main(void) {
             case 6: demo_nn_module(); break;
             case 7: demo_optim_module(); break;
             case 8: demo_serialization_module(); break;
+            case 9: demo_multiclass_module(); break;
             case 0:
                 printf("Au revoir\n");
                 return 0;

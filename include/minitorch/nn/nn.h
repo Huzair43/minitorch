@@ -54,6 +54,7 @@ void      mt_activation_forward(AgTape *t, MtActivation activation, const AgVal 
 void      mt_relu(AgTape *t, const AgVal *input, int n, AgVal *output);
 void      mt_sigmoid(AgTape *t, const AgVal *input, int n, AgVal *output);
 void      mt_tanh(AgTape *t, const AgVal *input, int n, AgVal *output);
+void      mt_softmax(AgTape *t, const AgVal *logits, int n, AgVal *probs);
 
 MtSequential *mt_sequential_create(int max_width);
 void          mt_sequential_free(MtSequential *seq);
@@ -69,5 +70,6 @@ void          mt_sequential_step(AgTape *t, MtSequential *seq, float lr);
 
 AgVal     mt_mse_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
 AgVal     mt_bce_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
+AgVal     mt_cross_entropy_loss(AgTape *t, const AgVal *probs, const AgVal *target, int n);
 
 #endif /* MINITORCH_NN_H */

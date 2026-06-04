@@ -183,6 +183,28 @@ void mt_tanh(AgTape *t, const AgVal *input, int n, AgVal *output) {
     mt_activation_forward(t, MT_ACT_TANH, input, n, output);
 }
 
+void mt_softmax(AgTape *t, const AgVal *logits, int n, AgVal *probs) {
+    if (!t || !logits || !probs || n <= 0) {
+        return;
+    }
+
+    AgVal *exp_vals = (AgVal *)malloc(sizeof(AgVal) * (size_t)n);
+    if (!exp_vals) {
+        return;
+    }
+
+    for (int i = 0; i < n; i++) {
+        exp_vals[i] = ag_exp(t, logits[i]);
+    }
+
+    AgVal denom = ag_sum(t, exp_vals, n);
+    for (int i = 0; i < n; i++) {
+        probs[i] = ag_div(t, exp_vals[i], denom);
+    }
+
+    free(exp_vals);
+}
+
 MtSequential *mt_sequential_create(int max_width) {
     if (max_width <= 0) {
         return NULL;
@@ -331,4 +353,20 @@ AgVal mt_bce_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n) {
     }
 
     return ag_mul(t, acc, ag_leaf(t, 1.0f / (float)n));
+}
+
+AgVal mt_cross_entropy_loss(AgTape *t, const AgVal *probs, const AgVal *target, int n) {
+    if (!t || !probs || !target || n <= 0) {
+        return -1;
+    }
+
+    AgVal acc = mt_zero(t);
+    AgVal eps = ag_leaf(t, 1e-7f);
+
+    for (int i = 0; i < n; i++) {
+        AgVal log_prob = ag_log(t, ag_add(t, probs[i], eps));
+        acc = ag_add(t, acc, ag_mul(t, target[i], log_prob));
+    }
+
+    return ag_neg(t, acc);
 }
