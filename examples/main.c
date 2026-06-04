@@ -369,7 +369,7 @@ static void demo_multiclass_module(void) {
     };
 
     mt_softmax(tape, logits, 3, probs);
-    AgVal loss = mt_cross_entropy_loss(tape, probs, target, 3);
+    AgVal loss = mt_cross_entropy_from_logits(tape, logits, target, 3);
 
     printf("Logits : [1.0, 2.0, 3.0]\n");
     printf("Cible  : classe 2\n");
@@ -377,7 +377,7 @@ static void demo_multiclass_module(void) {
            ag_data(tape, probs[0]),
            ag_data(tape, probs[1]),
            ag_data(tape, probs[2]));
-    printf("Perte CrossEntropy = %.4f\n", ag_data(tape, loss));
+    printf("Perte CrossEntropyFromLogits = %.4f\n", ag_data(tape, loss));
 
     ag_backward(tape, loss);
     printf("Gradient du logit cible = %.4f\n", ag_grad(tape, logits[2]));

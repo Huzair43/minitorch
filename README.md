@@ -79,6 +79,7 @@ Le module `nn` ajoute des briques de réseau:
 - `MSELoss`
 - `BCELoss`
 - `CrossEntropyLoss`
+- `CrossEntropyFromLogits`
 
 Exemple simple:
 
@@ -258,9 +259,10 @@ Architecture:
 
 ```text
 Linear(2, 3)
-Softmax
-CrossEntropy
+CrossEntropyFromLogits
 ```
+
+`Softmax` reste utilisé pour afficher les probabilités finales.
 
 Lancement:
 
@@ -343,7 +345,7 @@ MiniTorch reste volontairement simple. Il manque encore plusieurs éléments imp
 
 - autograd tensoriel complet
 - broadcasting général dans tous les gradients
-- softmax plus stable directement depuis les logits
+- softmax avec stabilité numérique renforcée pour les très grands logits
 - vraie API de module plus proche de PyTorch
 - initialisations Xavier et He
 - séparation train/test
@@ -364,14 +366,15 @@ Les prochaines étapes possibles:
    - validation
    - test
 
-3. Améliorer `CrossEntropyLoss`:
-   - version directe depuis logits
-   - meilleure stabilité numérique
-
-4. Ajouter une API d'évaluation:
+3. Ajouter des métriques:
    - accuracy
    - loss moyenne
    - matrice de confusion simple
+
+4. Ajouter une API d'évaluation:
+   - évaluer un modèle sans entraîner
+   - afficher les prédictions
+   - comparer train et validation
 
 5. Nettoyer l'API publique:
    - noms plus cohérents

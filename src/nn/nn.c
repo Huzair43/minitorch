@@ -370,3 +370,36 @@ AgVal mt_cross_entropy_loss(AgTape *t, const AgVal *probs, const AgVal *target, 
 
     return ag_neg(t, acc);
 }
+
+AgVal mt_cross_entropy_from_logits(AgTape *t, const AgVal *logits, const AgVal *target, int n) {
+    if (!t || !logits || !target || n <= 0) {
+        return -1;
+    }
+
+    float max_logit = ag_data(t, logits[0]);
+    for (int i = 1; i < n; i++) {
+        float value = ag_data(t, logits[i]);
+        if (value > max_logit) {
+            max_logit = value;
+        }
+    }
+
+    AgVal max_node = ag_leaf(t, max_logit);
+    AgVal *shifted_exp = (AgVal *)malloc(sizeof(AgVal) * (size_t)n);
+    if (!shifted_exp) {
+        return -1;
+    }
+
+    for (int i = 0; i < n; i++) {
+        shifted_exp[i] = ag_exp(t, ag_sub(t, logits[i], max_node));
+    }
+
+    AgVal log_sum_exp = ag_add(t, ag_log(t, ag_sum(t, shifted_exp, n)), max_node);
+    AgVal target_logit = mt_zero(t);
+    for (int i = 0; i < n; i++) {
+        target_logit = ag_add(t, target_logit, ag_mul(t, target[i], logits[i]));
+    }
+
+    free(shifted_exp);
+    return ag_sub(t, log_sum_exp, target_logit);
+}

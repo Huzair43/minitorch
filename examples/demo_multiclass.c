@@ -39,17 +39,14 @@ static float train_batch(AgTape* tape,
             ag_leaf(tape, mt_batch_feature(batch, i, 1))
         };
         AgVal logits[N_CLASSES];
-        AgVal probs[N_CLASSES];
         AgVal target[N_CLASSES];
         int label = (int)mt_batch_label(batch, i);
 
         mt_linear_forward(tape, model, input, logits);
-        mt_softmax(tape, logits, N_CLASSES, probs);
-
         for (int c = 0; c < N_CLASSES; c++) {
             target[c] = ag_leaf(tape, c == label ? 1.0f : 0.0f);
         }
-        losses[i] = mt_cross_entropy_loss(tape, probs, target, N_CLASSES);
+        losses[i] = mt_cross_entropy_from_logits(tape, logits, target, N_CLASSES);
     }
 
     AgVal loss = ag_mul(tape, ag_sum(tape, losses, count), ag_leaf(tape, 1.0f / (float)count));
@@ -110,7 +107,7 @@ int main(void) {
     float lr = 0.05f;
 
     printf("Démo classification multi-classe MiniTorch\n");
-    printf("Modèle : Linear(2, 3) + Softmax + CrossEntropy\n");
+    printf("Modèle : Linear(2, 3) + CrossEntropyFromLogits\n");
     printf("\nÉpoques : ");
     scanf("%d", &epochs);
     if (epochs < 1) epochs = 200;

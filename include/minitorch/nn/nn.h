@@ -71,5 +71,6 @@ void          mt_sequential_step(AgTape *t, MtSequential *seq, float lr);
 AgVal     mt_mse_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
 AgVal     mt_bce_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
 AgVal     mt_cross_entropy_loss(AgTape *t, const AgVal *probs, const AgVal *target, int n);
+AgVal     mt_cross_entropy_from_logits(AgTape *t, const AgVal *logits, const AgVal *target, int n);
 
 #endif /* MINITORCH_NN_H */

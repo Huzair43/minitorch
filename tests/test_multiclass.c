@@ -91,6 +91,31 @@ static void test_cross_entropy_value(void) {
     ag_tape_free(tape);
 }
 
+static void test_cross_entropy_from_logits_value(void) {
+    section("CrossEntropyFromLogits : valeur stable");
+
+    AgTape* tape = ag_tape_create();
+    AgVal logits[3] = {
+        ag_leaf(tape, 1.0f),
+        ag_leaf(tape, 2.0f),
+        ag_leaf(tape, 3.0f)
+    };
+    AgVal target[3] = {
+        ag_leaf(tape, 0.0f),
+        ag_leaf(tape, 0.0f),
+        ag_leaf(tape, 1.0f)
+    };
+
+    AgVal loss = mt_cross_entropy_from_logits(tape, logits, target, 3);
+    float expected = logf(expf(1.0f - 3.0f) + expf(2.0f - 3.0f) + 1.0f);
+    CHECK("CE logits classe 2", ag_data(tape, loss), expected);
+
+    ag_backward(tape, loss);
+    CHECK("gradient logit cible negatif", ag_grad(tape, logits[2]) < 0.0f ? 1.0f : 0.0f, 1.0f);
+
+    ag_tape_free(tape);
+}
+
 static float train_one_epoch(AgTape* tape,
                              MtLinear* model,
                              MtOptimizer* optim,
@@ -108,16 +133,14 @@ static float train_one_epoch(AgTape* tape,
             ag_leaf(tape, mt_batch_feature(batch, i, 1))
         };
         AgVal logits[N_CLASSES];
-        AgVal probs[N_CLASSES];
         AgVal target[N_CLASSES];
         int label = (int)mt_batch_label(batch, i);
 
         mt_linear_forward(tape, model, input, logits);
-        mt_softmax(tape, logits, N_CLASSES, probs);
         for (int c = 0; c < N_CLASSES; c++) {
             target[c] = ag_leaf(tape, c == label ? 1.0f : 0.0f);
         }
-        losses[i] = mt_cross_entropy_loss(tape, probs, target, N_CLASSES);
+        losses[i] = mt_cross_entropy_from_logits(tape, logits, target, N_CLASSES);
     }
 
     AgVal loss = ag_mul(tape, ag_sum(tape, losses, count), ag_leaf(tape, 1.0f / (float)count));
@@ -199,6 +222,7 @@ int main(void) {
 
     test_softmax_distribution();
     test_cross_entropy_value();
+    test_cross_entropy_from_logits_value();
     test_multiclass_training();
 
     summary();
