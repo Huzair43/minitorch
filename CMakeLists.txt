@@ -20,6 +20,10 @@ add_executable(demo_train examples/demo_train.c)
 target_include_directories(demo_train PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(demo_train minitorch m)
 
+add_executable(demo_xor examples/demo_xor.c)
+target_include_directories(demo_xor PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(demo_xor minitorch m)
+
 # ── Tests ──────────────────────────────────────────────
 enable_testing()
 
@@ -71,4 +75,14 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_data.c")
     )
     target_link_libraries(test_data minitorch m)
     add_test(NAME DataUnitTests COMMAND test_data)
+endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_xor.c")
+    add_executable(test_xor tests/test_xor.c)
+    target_include_directories(test_xor PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(test_xor minitorch m)
+    add_test(NAME XORTrainingTests COMMAND test_xor)
 endif()
