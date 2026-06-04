@@ -110,58 +110,50 @@ Tensor* tensor_transpose(Tensor* t, int axis1, int axis2) {
     if (axis1 == axis2) {
         return tensor_clone(t);
     }
-    
-    Tensor* result = (Tensor*)malloc(sizeof(Tensor));
-    if (!result) return NULL;
-    
-    result->ndim = t->ndim;
-    result->shape = (int*)malloc(sizeof(int) * t->ndim);
-    result->strides = (int*)malloc(sizeof(int) * t->ndim);
-    
+
+    int* new_shape = (int*)malloc(sizeof(int) * t->ndim);
+    if (!new_shape) return NULL;
+
     for (int i = 0; i < t->ndim; i++) {
-        result->shape[i] = t->shape[i];
-        result->strides[i] = t->strides[i];
+        new_shape[i] = t->shape[i];
     }
-    
-    int temp = result->shape[axis1];
-    result->shape[axis1] = result->shape[axis2];
-    result->shape[axis2] = temp;
-    
-    int temp_stride = result->strides[axis1];
-    result->strides[axis1] = result->strides[axis2];
-    result->strides[axis2] = temp_stride;
-    
-    result->size = t->size;
-    result->data = (float*)malloc(result->size * sizeof(float));
-    if (!result->data) {
-        free(result->shape);
-        free(result->strides);
-        free(result);
-        return NULL;
-    }
-    
+    int temp = new_shape[axis1];
+    new_shape[axis1] = new_shape[axis2];
+    new_shape[axis2] = temp;
+
+    Tensor* result = tensor_create(new_shape, t->ndim);
+    free(new_shape);
+    if (!result) return NULL;
+
     int* indices = (int*)calloc(t->ndim, sizeof(int));
     int* transposed_indices = (int*)calloc(t->ndim, sizeof(int));
-    
+    if (!indices || !transposed_indices) {
+        free(indices);
+        free(transposed_indices);
+        tensor_free(result);
+        return NULL;
+    }
+
     for (int i = 0; i < t->size; i++) {
         int idx = i;
         for (int j = t->ndim - 1; j >= 0; j--) {
             indices[j] = idx % t->shape[j];
             idx /= t->shape[j];
         }
-        
+
         for (int j = 0; j < t->ndim; j++) {
             transposed_indices[j] = indices[j];
         }
-        
+
         int temp_idx = transposed_indices[axis1];
         transposed_indices[axis1] = transposed_indices[axis2];
         transposed_indices[axis2] = temp_idx;
-        
+
         int out_idx = tensor_get_index(result, transposed_indices);
-        result->data[out_idx] = t->data[i];
+        int in_idx = tensor_get_index(t, indices);
+        result->data[out_idx] = t->data[in_idx];
     }
-    
+
     free(indices);
     free(transposed_indices);
     return result;

@@ -10,10 +10,13 @@ typedef struct {
 } Tensor;
 
 /* Core tensor creation & management */
+int tensor_numel(const int* shape, int ndim);
+int tensor_same_shape(const Tensor* a, const Tensor* b);
 Tensor* tensor_create(const int* shape, int ndim);
 Tensor* tensor_zeros(const int* shape, int ndim);
 Tensor* tensor_ones(const int* shape, int ndim);
 Tensor* tensor_clone(const Tensor* t);
+Tensor* tensor_broadcast_to(const Tensor* t, const int* target_shape, int target_ndim);
 void tensor_free(Tensor* t);
 
 /* Indexing & access */

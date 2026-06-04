@@ -1,339 +1,245 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+
+#ifdef _WIN32
 #include <windows.h>
+#endif
+
 #include "minitorch/core/tensor.h"
 #include "minitorch/core/tensor_ops.h"
 #include "minitorch/core/tensor_linalg.h"
 #include "minitorch/core/autograd.h"
 
-/* ════════════════════════════════════════════════════════
-   MENU PRINCIPAL
-   ════════════════════════════════════════════════════════ */
-
-void print_menu() {
-    printf("\n=== MiniTorch v2 - Interactive Menu ===\n");
-    printf("--- Tenseurs ---\n");
-    printf("1. Creer et afficher une matrice\n");
-    printf("2. Addition de deux matrices\n");
-    printf("3. Multiplication element par element\n");
-    printf("4. Multiplication matricielle (matmul)\n");
-    printf("5. Transposer une matrice\n");
-    printf("6. Calculer le determinant\n");
-    printf("--- Autograd ---\n");
-    printf("7. Demo : z = x * y, backward\n");
-    printf("8. Demo : z = relu(x * w + b)\n");
-    printf("9. Demo : regression (1 pas de gradient)\n");
-    printf("0. Quitter\n");
-    printf("Choisir une option: ");
-}
-
-/* ════════════════════════════════════════════════════════
-   OPTIONS TENSEURS (inchangees)
-   ════════════════════════════════════════════════════════ */
-
-Tensor* input_matrix() {
-    int rows, cols;
-    printf("Nombre de lignes: ");
-    scanf("%d", &rows);
-    printf("Nombre de colonnes: ");
-    scanf("%d", &cols);
-
-    if (rows <= 0 || cols <= 0) {
-        printf("Erreur: dimensions invalides!\n");
-        return NULL;
-    }
-
-    int shape[2] = {rows, cols};
-    Tensor* t = tensor_create(shape, 2);
-    if (!t) {
-        printf("Erreur: allocation memoire echouee\n");
-        return NULL;
-    }
-
-    printf("Entrer les %d valeurs (ligne par ligne):\n", rows * cols);
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            printf("  [%d][%d] = ", i, j);
-            float value;
-            scanf("%f", &value);
-            tensor_set(t, (int[]){i, j}, value);
-        }
-    }
-    return t;
-}
-
-void option_create_matrix() {
-    printf("\n--- Creer une matrice ---\n");
-    Tensor* t = input_matrix();
-    if (t) {
-        printf("\nMatrice creee:\n");
-        tensor_print(t);
-        tensor_free(t);
-    }
-}
-
-void option_add_matrices() {
-    printf("\n--- Addition de deux matrices ---\n");
-    printf("\nPremiere matrice:\n");
-    Tensor* a = input_matrix();
-    if (!a) return;
-    printf("\nDeuxieme matrice:\n");
-    Tensor* b = input_matrix();
-    if (!b) { tensor_free(a); return; }
-    Tensor* c = tensor_add(a, b);
-    if (c) {
-        printf("\nMatrice A:\n"); tensor_print(a);
-        printf("\nMatrice B:\n"); tensor_print(b);
-        printf("\nA + B:\n");     tensor_print(c);
-        tensor_free(c);
-    } else {
-        printf("Erreur: les matrices doivent avoir les memes dimensions!\n");
-    }
-    tensor_free(a);
-    tensor_free(b);
-}
-
-void option_mul_elementwise() {
-    printf("\n--- Multiplication element par element ---\n");
-    printf("\nPremiere matrice:\n");
-    Tensor* a = input_matrix();
-    if (!a) return;
-    printf("\nDeuxieme matrice:\n");
-    Tensor* b = input_matrix();
-    if (!b) { tensor_free(a); return; }
-    Tensor* c = tensor_mul(a, b);
-    if (c) {
-        printf("\nMatrice A:\n"); tensor_print(a);
-        printf("\nMatrice B:\n"); tensor_print(b);
-        printf("\nA * B (element par element):\n"); tensor_print(c);
-        tensor_free(c);
-    } else {
-        printf("Erreur: les matrices doivent avoir les memes dimensions!\n");
-    }
-    tensor_free(a);
-    tensor_free(b);
-}
-
-void option_matmul() {
-    printf("\n--- Multiplication matricielle ---\n");
-    printf("\nMatrice A (m x k):\n");
-    Tensor* a = input_matrix();
-    if (!a) return;
-    printf("\nMatrice B (k x n):\n");
-    Tensor* b = input_matrix();
-    if (!b) { tensor_free(a); return; }
-    Tensor* c = tensor_matmul(a, b);
-    if (c) {
-        printf("\nMatrice A (%d x %d):\n", a->shape[0], a->shape[1]); tensor_print(a);
-        printf("\nMatrice B (%d x %d):\n", b->shape[0], b->shape[1]); tensor_print(b);
-        printf("\nA @ B (%d x %d):\n",     c->shape[0], c->shape[1]); tensor_print(c);
-        tensor_free(c);
-    }
-    tensor_free(a);
-    tensor_free(b);
-}
-
-void option_transpose() {
-    printf("\n--- Transposer une matrice ---\n");
-    Tensor* t = input_matrix();
-    if (!t) return;
-    if (t->ndim != 2) {
-        printf("Erreur: transpose fonctionne uniquement sur les matrices 2D\n");
-        tensor_free(t); return;
-    }
-    Tensor* transposed = tensor_transpose(t, 0, 1);
-    if (transposed) {
-        printf("\nMatrice originale (%d x %d):\n",   t->shape[0], t->shape[1]);         tensor_print(t);
-        printf("\nMatrice transposee (%d x %d):\n", transposed->shape[0], transposed->shape[1]); tensor_print(transposed);
-        tensor_free(transposed);
-    }
-    tensor_free(t);
-}
-
-void option_determinant() {
-    printf("\n--- Calculer le determinant ---\n");
-    Tensor* t = input_matrix();
-    if (!t) return;
-    if (t->ndim != 2 || t->shape[0] != t->shape[1]) {
-        printf("Erreur: le determinant s'applique uniquement aux matrices carrees!\n");
-        tensor_free(t); return;
-    }
-    float det = tensor_det(t);
-    printf("\nMatrice %d x %d:\n", t->shape[0], t->shape[1]);
-    tensor_print(t);
-    printf("\nDeterminant = %f\n", det);
-    tensor_free(t);
-}
-
-/* ════════════════════════════════════════════════════════
-   OPTIONS AUTOGRAD
-   ════════════════════════════════════════════════════════ */
-
-/*
- * Option 7 : z = x * y
- * Verifie que dz/dx = y et dz/dy = x
- */
-void option_ag_mul_simple() {
-    printf("\n--- Autograd : z = x * y ---\n");
-
-    float xv, yv;
-    printf("x = "); scanf("%f", &xv);
-    printf("y = "); scanf("%f", &yv);
-
-    AgTape *t = ag_tape_create();
-
-    AgVal x = ag_leaf(t, xv);
-    AgVal y = ag_leaf(t, yv);
-    AgVal z = ag_mul(t, x, y);
-
-    printf("\nForward:\n");
-    printf("  x       = %.4f\n", ag_data(t, x));
-    printf("  y       = %.4f\n", ag_data(t, y));
-    printf("  z = x*y = %.4f\n", ag_data(t, z));
-
-    ag_backward(t, z);
-
-    printf("\nBackward:\n");
-    printf("  dz/dx = %.4f  (attendu : y = %.4f)\n", ag_grad(t, x), yv);
-    printf("  dz/dy = %.4f  (attendu : x = %.4f)\n", ag_grad(t, y), xv);
-
-    ag_tape_free(t);
-}
-
-/*
- * Option 8 : z = relu(x * w + b)
- * Neurone unique, activation relu
- */
-void option_ag_neuron() {
-    printf("\n--- Autograd : z = relu(x*w + b) ---\n");
-
-    float xv, wv, bv;
-    printf("x = "); scanf("%f", &xv);
-    printf("w = "); scanf("%f", &wv);
-    printf("b = "); scanf("%f", &bv);
-
-    AgTape *t = ag_tape_create();
-
-    AgVal x   = ag_leaf(t, xv);
-    AgVal w   = ag_leaf(t, wv);
-    AgVal b   = ag_leaf(t, bv);
-    AgVal xw  = ag_mul(t, x, w);
-    AgVal pre = ag_add(t, xw, b);
-    AgVal z   = ag_relu(t, pre);
-
-    printf("\nForward:\n");
-    printf("  x*w         = %.4f\n", ag_data(t, xw));
-    printf("  x*w + b     = %.4f\n", ag_data(t, pre));
-    printf("  relu(x*w+b) = %.4f\n", ag_data(t, z));
-
-    ag_backward(t, z);
-
-    printf("\nBackward (gradients par rapport a z):\n");
-    printf("  dz/dw = %.4f\n", ag_grad(t, w));
-    printf("  dz/db = %.4f\n", ag_grad(t, b));
-    printf("  dz/dx = %.4f\n", ag_grad(t, x));
-
-    if (ag_data(t, pre) > 0.0f) {
-        printf("\n  [relu actif]  dz/dw attendu = x = %.4f\n", xv);
-        printf("                dz/db attendu = 1\n");
-    } else {
-        printf("\n  [relu eteint] tous les gradients attendus = 0\n");
-    }
-
-    ag_tape_free(t);
-}
-
-/*
- * Option 9 : regression scalaire — 1 pas de gradient
- *
- * Modele  : y_hat = x * w + b
- * Loss    : L = (y_hat - y_true)^2
- * Mise a jour : w <- w - lr * dL/dw
- *               b <- b - lr * dL/db
- */
-void option_ag_regression_step() {
-    printf("\n--- Autograd : regression, 1 pas ---\n");
-    printf("Modele : y_hat = x*w + b,  Loss = (y_hat - y_true)^2\n\n");
-
-    float xv, wv, bv, ytrue, lr;
-    printf("x      = "); scanf("%f", &xv);
-    printf("w      = "); scanf("%f", &wv);
-    printf("b      = "); scanf("%f", &bv);
-    printf("y_true = "); scanf("%f", &ytrue);
-    printf("lr     = "); scanf("%f", &lr);
-
-    AgTape *t = ag_tape_create();
-
-    AgVal x      = ag_leaf(t, xv);
-    AgVal w      = ag_leaf(t, wv);
-    AgVal b      = ag_leaf(t, bv);
-    AgVal y_true = ag_leaf(t, ytrue);
-
-    AgVal y_hat  = ag_add(t, ag_mul(t, x, w), b);
-    AgVal diff   = ag_sub(t, y_hat, y_true);
-    AgVal loss   = ag_mul(t, diff, diff);   /* (y_hat - y_true)^2 */
-
-    printf("\nForward:\n");
-    printf("  y_hat = %.4f\n", ag_data(t, y_hat));
-    printf("  loss  = %.4f\n", ag_data(t, loss));
-
-    ag_backward(t, loss);
-
-    float dw = ag_grad(t, w);
-    float db = ag_grad(t, b);
-
-    printf("\nBackward:\n");
-    printf("  dL/dw = %.4f\n", dw);
-    printf("  dL/db = %.4f\n", db);
-
-    float new_w = wv - lr * dw;
-    float new_b = bv - lr * db;
-
-    printf("\nApres mise a jour (lr = %.4f):\n", lr);
-    printf("  w : %.4f  ->  %.4f\n", wv, new_w);
-    printf("  b : %.4f  ->  %.4f\n", bv, new_b);
-
-    /* Verification : loss apres le pas */
-    float new_yhat = xv * new_w + new_b;
-    float new_loss = (new_yhat - ytrue) * (new_yhat - ytrue);
-    printf("\nVerification (calcul direct):\n");
-    printf("  new y_hat = %.4f\n", new_yhat);
-    printf("  new loss  = %.4f  (avant : %.4f)\n", new_loss, ag_data(t, loss));
-
-    ag_tape_free(t);
-}
-
-/* ════════════════════════════════════════════════════════
-   MAIN
-   ════════════════════════════════════════════════════════ */
-
-int main() {
+static void configure_console(void) {
+#ifdef _WIN32
     SetConsoleOutputCP(65001);
-    printf("╔════════════════════════════════════════╗\n");
-    printf("║    MiniTorch v2 - Interactive Mode    ║\n");
-    printf("╚════════════════════════════════════════╝\n");
+    SetConsoleCP(65001);
+#endif
+}
 
-    int choice;
+static void print_title(const char* title) {
+    printf("\n=== %s ===\n", title);
+}
+
+static void print_tensor_2d(const Tensor* t) {
+    if (!t || t->ndim != 2) {
+        printf("<invalid tensor>\n");
+        return;
+    }
+
+    for (int i = 0; i < t->shape[0]; i++) {
+        printf("[");
+        for (int j = 0; j < t->shape[1]; j++) {
+            if (j > 0) printf(", ");
+            printf("%7.3f", tensor_get(t, (int[]){i, j}));
+        }
+        printf(" ]\n");
+    }
+}
+
+static void demo_tensor_basics(void) {
+    print_title("Bases des tenseurs");
+
+    int shape[2] = {2, 3};
+    Tensor* a = tensor_create(shape, 2);
+    Tensor* b = tensor_create(shape, 2);
+
+    float a_values[] = {1, 2, 3, 4, 5, 6};
+    float b_values[] = {10, 20, 30, 40, 50, 60};
+    for (int i = 0; i < 6; i++) {
+        a->data[i] = a_values[i];
+        b->data[i] = b_values[i];
+    }
+
+    Tensor* sum = tensor_add(a, b);
+    Tensor* prod = tensor_mul(a, b);
+
+    printf("A:\n");
+    print_tensor_2d(a);
+    printf("B:\n");
+    print_tensor_2d(b);
+    printf("A + B:\n");
+    print_tensor_2d(sum);
+    printf("A * B:\n");
+    print_tensor_2d(prod);
+
+    tensor_free(a);
+    tensor_free(b);
+    tensor_free(sum);
+    tensor_free(prod);
+}
+
+static void demo_broadcast_and_reduce(void) {
+    print_title("Broadcast et réduction");
+
+    int matrix_shape[2] = {2, 3};
+    int bias_shape[1] = {3};
+    Tensor* matrix = tensor_create(matrix_shape, 2);
+    Tensor* bias = tensor_create(bias_shape, 1);
+
+    float matrix_values[] = {1, 2, 3, 4, 5, 6};
+    float bias_values[] = {10, 20, 30};
+    for (int i = 0; i < 6; i++) matrix->data[i] = matrix_values[i];
+    for (int i = 0; i < 3; i++) bias->data[i] = bias_values[i];
+
+    Tensor* shifted = tensor_add(matrix, bias);
+    Tensor* row_sum = tensor_sum(matrix, 1);
+    Tensor* col_mean = tensor_mean(matrix, 0);
+    Tensor* bias_broadcast = tensor_broadcast_to(bias, matrix_shape, 2);
+
+    printf("Matrice :\n");
+    print_tensor_2d(matrix);
+    printf("Ligne de biais :\n");
+    print_tensor_2d(bias_broadcast);
+    printf("Matrice + biais :\n");
+    print_tensor_2d(shifted);
+    printf("Row sums (axis=1):\n");
+    tensor_print(row_sum);
+    printf("Column means (axis=0):\n");
+    tensor_print(col_mean);
+
+    tensor_free(matrix);
+    tensor_free(bias);
+    tensor_free(shifted);
+    tensor_free(row_sum);
+    tensor_free(col_mean);
+    tensor_free(bias_broadcast);
+}
+
+static void demo_linalg(void) {
+    print_title("Algèbre linéaire");
+
+    int a_shape[2] = {2, 2};
+    int b_shape[2] = {2, 2};
+    Tensor* a = tensor_create(a_shape, 2);
+    Tensor* b = tensor_create(b_shape, 2);
+
+    float a_values[] = {1, 2, 3, 4};
+    float b_values[] = {5, 6, 7, 8};
+    for (int i = 0; i < 4; i++) {
+        a->data[i] = a_values[i];
+        b->data[i] = b_values[i];
+    }
+
+    Tensor* c = tensor_matmul(a, b);
+    Tensor* at = tensor_transpose(a, 0, 1);
+    float det = tensor_det(a);
+
+    printf("A:\n");
+    print_tensor_2d(a);
+    printf("B:\n");
+    print_tensor_2d(b);
+    printf("A @ B:\n");
+    print_tensor_2d(c);
+    printf("transpose(A):\n");
+    print_tensor_2d(at);
+    printf("det(A) = %.3f\n", det);
+
+    tensor_free(a);
+    tensor_free(b);
+    tensor_free(c);
+    tensor_free(at);
+}
+
+static void demo_scalar_autograd(void) {
+    print_title("Chaîne autograd scalaire");
+
+    AgTape* tape = ag_tape_create();
+    AgVal x = ag_leaf(tape, 2.0f);
+    AgVal w = ag_leaf(tape, 3.0f);
+    AgVal b = ag_leaf(tape, 1.0f);
+    AgVal y = ag_leaf(tape, 5.0f);
+
+    AgVal y_hat = ag_add(tape, ag_mul(tape, x, w), b);
+    AgVal diff = ag_sub(tape, y_hat, y);
+    AgVal loss = ag_square(tape, diff);
+
+    printf("Modèle : y_hat = x*w + b\n");
+    printf("x=2, w=3, b=1, y=5\n");
+    printf("y_hat = %.3f\n", ag_data(tape, y_hat));
+    printf("perte = %.3f\n", ag_data(tape, loss));
+
+    ag_backward(tape, loss);
+    printf("dL/dx = %.3f\n", ag_grad(tape, x));
+    printf("dL/dw = %.3f\n", ag_grad(tape, w));
+    printf("dL/db = %.3f\n", ag_grad(tape, b));
+
+    ag_tape_free(tape);
+}
+
+static void demo_tensor_autograd(void) {
+    print_title("Aides autograd tensorielles");
+
+    AgTape* tape = ag_tape_create();
+
+    AgVal x[6];
+    AgVal bias[3];
+    AgVal shifted[6];
+
+    float x_values[] = {1, 2, 3, 4, 5, 6};
+    float bias_values[] = {10, 20, 30};
+    for (int i = 0; i < 6; i++) x[i] = ag_leaf(tape, x_values[i]);
+    for (int i = 0; i < 3; i++) bias[i] = ag_leaf(tape, bias_values[i]);
+
+    ag_tensor_broadcast_binary_2d(tape, x, 2, 3, bias, 1, 3, shifted, ag_add);
+
+    printf("X + bias:\n");
+    for (int i = 0; i < 2; i++) {
+        printf("[");
+        for (int j = 0; j < 3; j++) {
+            if (j > 0) printf(", ");
+            printf("%7.3f", ag_data(tape, shifted[i * 3 + j]));
+        }
+        printf(" ]\n");
+    }
+
+    AgVal loss = ag_sum(tape, shifted, 6);
+    printf("perte = sum(X + biais) = %.3f\n", ag_data(tape, loss));
+    ag_backward(tape, loss);
+
+    printf("Gradients pour le biais :\n");
+    for (int j = 0; j < 3; j++) {
+        printf("  db[%d] = %.3f\n", j, ag_grad(tape, bias[j]));
+    }
+
+    ag_tape_free(tape);
+}
+
+static void print_menu(void) {
+    printf("\nMenu de démo MiniTorch\n");
+    printf("1. Bases des tenseurs\n");
+    printf("2. Broadcast et réduction\n");
+    printf("3. Algèbre linéaire\n");
+    printf("4. Chaîne autograd scalaire\n");
+    printf("5. Aides autograd tensorielles\n");
+    printf("0. Quit\n");
+    printf("Choix : ");
+}
+
+int main(void) {
+    configure_console();
+    printf("Démo MiniTorch\n");
+
     while (1) {
+        int choice = -1;
         print_menu();
-        scanf("%d", &choice);
+        if (scanf("%d", &choice) != 1) {
+            return 1;
+        }
 
         switch (choice) {
-            case 1: option_create_matrix();     break;
-            case 2: option_add_matrices();      break;
-            case 3: option_mul_elementwise();   break;
-            case 4: option_matmul();            break;
-            case 5: option_transpose();         break;
-            case 6: option_determinant();       break;
-            case 7: option_ag_mul_simple();     break;
-            case 8: option_ag_neuron();         break;
-            case 9: option_ag_regression_step(); break;
+            case 1: demo_tensor_basics(); break;
+            case 2: demo_broadcast_and_reduce(); break;
+            case 3: demo_linalg(); break;
+            case 4: demo_scalar_autograd(); break;
+            case 5: demo_tensor_autograd(); break;
             case 0:
-                printf("\nMerci d'avoir utilise MiniTorch! Au revoir.\n");
+                printf("Au revoir\n");
                 return 0;
             default:
-                printf("Option invalide. Veuillez reessayer.\n");
+                printf("Choix invalide\n");
+                break;
         }
     }
-    return 0;
 }

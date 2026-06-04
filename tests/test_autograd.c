@@ -137,6 +137,28 @@ static void test_relu(void) {
     }
 }
 
+static void test_leaky_relu(void) {
+    section("leaky_relu : pente sur la partie negative");
+    {
+        AgTape *t = ag_tape_create();
+        AgVal a = ag_leaf(t, 3.0f);
+        AgVal z = ag_leaky_relu(t, a, 0.1f);
+        ag_backward(t, z);
+        CHECK("leaky_relu( 3) forward  = 3", ag_data(t, z), 3.0f);
+        CHECK("leaky_relu( 3) backward = 1", ag_grad(t, a), 1.0f);
+        ag_tape_free(t);
+    }
+    {
+        AgTape *t = ag_tape_create();
+        AgVal a = ag_leaf(t, -2.0f);
+        AgVal z = ag_leaky_relu(t, a, 0.1f);
+        ag_backward(t, z);
+        CHECK("leaky_relu(-2) forward  = -0.2", ag_data(t, z), -0.2f);
+        CHECK("leaky_relu(-2) backward = 0.1", ag_grad(t, a), 0.1f);
+        ag_tape_free(t);
+    }
+}
+
 static void test_tanh(void) {
     section("tanh : z = tanh(a)");
     AgTape *t = ag_tape_create();
@@ -185,6 +207,37 @@ static void test_log(void) {
     ag_tape_free(t);
 }
 
+static void test_square_abs_softplus(void) {
+    section("square / abs / softplus");
+    {
+        AgTape *t = ag_tape_create();
+        AgVal a = ag_leaf(t, -3.0f);
+        AgVal z = ag_square(t, a);
+        ag_backward(t, z);
+        CHECK("square(-3) forward = 9", ag_data(t, z), 9.0f);
+        CHECK("square(-3) backward = -6", ag_grad(t, a), -6.0f);
+        ag_tape_free(t);
+    }
+    {
+        AgTape *t = ag_tape_create();
+        AgVal a = ag_leaf(t, -4.0f);
+        AgVal z = ag_abs(t, a);
+        ag_backward(t, z);
+        CHECK("abs(-4) forward = 4", ag_data(t, z), 4.0f);
+        CHECK("abs(-4) backward = -1", ag_grad(t, a), -1.0f);
+        ag_tape_free(t);
+    }
+    {
+        AgTape *t = ag_tape_create();
+        AgVal a = ag_leaf(t, 0.0f);
+        AgVal z = ag_softplus(t, a);
+        ag_backward(t, z);
+        CHECK("softplus(0) forward", ag_data(t, z), logf(2.0f));
+        CHECK("softplus(0) backward", ag_grad(t, a), 0.5f);
+        ag_tape_free(t);
+    }
+}
+
 /* ════════════════════════════════════════════════════════
    TESTS CHAIN RULE
    ════════════════════════════════════════════════════════ */
@@ -224,6 +277,22 @@ static void test_shared_node(void) {
     ag_backward(t, z);
     CHECK("forward  z = 9",     ag_data(t, z), 9.0f);
     CHECK("backward dz/da = 6", ag_grad(t, a), 6.0f);
+    ag_tape_free(t);
+}
+
+static void test_backward_accumulation(void) {
+    section("backward cumule : deux backward sans zero_grad");
+    AgTape *t = ag_tape_create();
+    AgVal a = ag_leaf(t, 2.0f);
+    AgVal b = ag_leaf(t, 5.0f);
+    AgVal z = ag_mul(t, a, b);
+
+    ag_backward(t, z);
+    CHECK("premier backward dz/da = 5", ag_grad(t, a), 5.0f);
+
+    ag_backward(t, z);
+    CHECK("second backward dz/da = 10", ag_grad(t, a), 10.0f);
+    CHECK("second backward dz/db = 4", ag_grad(t, b), 4.0f);
     ag_tape_free(t);
 }
 
@@ -325,6 +394,66 @@ static void test_matmul(void) {
     ag_tape_free(t);
 }
 
+static void test_broadcast_2d(void) {
+    section("broadcast 2D : matrice + vecteur ligne");
+    AgTape *t = ag_tape_create();
+
+    AgVal lhs[6], rhs[3], out[6];
+    float lhs_data[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    float rhs_data[] = {10.0f, 20.0f, 30.0f};
+    for (int i = 0; i < 6; i++) lhs[i] = ag_leaf(t, lhs_data[i]);
+    for (int i = 0; i < 3; i++) rhs[i] = ag_leaf(t, rhs_data[i]);
+
+    ag_tensor_broadcast_binary_2d(t, lhs, 2, 3, rhs, 1, 3, out, ag_add);
+
+    CHECK("out[0,0] = 11", ag_data(t, out[0]), 11.0f);
+    CHECK("out[0,1] = 22", ag_data(t, out[1]), 22.0f);
+    CHECK("out[0,2] = 33", ag_data(t, out[2]), 33.0f);
+    CHECK("out[1,0] = 14", ag_data(t, out[3]), 14.0f);
+    CHECK("out[1,1] = 25", ag_data(t, out[4]), 25.0f);
+    CHECK("out[1,2] = 36", ag_data(t, out[5]), 36.0f);
+
+    AgVal loss = ag_sum(t, out, 6);
+    ag_backward(t, loss);
+    CHECK("grad lhs[0] = 1", ag_grad(t, lhs[0]), 1.0f);
+    CHECK("grad rhs[0] = 2", ag_grad(t, rhs[0]), 2.0f);
+    CHECK("grad rhs[1] = 2", ag_grad(t, rhs[1]), 2.0f);
+
+    ag_tape_free(t);
+}
+
+static void test_reduce_2d(void) {
+    section("reduction 2D : sum / mean");
+    AgTape *t = ag_tape_create();
+
+    AgVal src[6];
+    float data[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    for (int i = 0; i < 6; i++) src[i] = ag_leaf(t, data[i]);
+
+    AgVal sum_cols[3];
+    AgVal sum_rows[2];
+    AgVal mean_rows[2];
+
+    ag_tensor_reduce_sum_2d(t, src, 2, 3, 0, sum_cols);
+    ag_tensor_reduce_sum_2d(t, src, 2, 3, 1, sum_rows);
+    ag_tensor_reduce_mean_2d(t, src, 2, 3, 1, mean_rows);
+
+    CHECK("sum axis0[0] = 5", ag_data(t, sum_cols[0]), 5.0f);
+    CHECK("sum axis0[1] = 7", ag_data(t, sum_cols[1]), 7.0f);
+    CHECK("sum axis0[2] = 9", ag_data(t, sum_cols[2]), 9.0f);
+    CHECK("sum axis1[0] = 6", ag_data(t, sum_rows[0]), 6.0f);
+    CHECK("sum axis1[1] = 15", ag_data(t, sum_rows[1]), 15.0f);
+    CHECK("mean axis1[0] = 2", ag_data(t, mean_rows[0]), 2.0f);
+    CHECK("mean axis1[1] = 5", ag_data(t, mean_rows[1]), 5.0f);
+
+    AgVal loss = ag_sum(t, sum_cols, 3);
+    ag_backward(t, loss);
+    CHECK("grad src[0] = 1", ag_grad(t, src[0]), 1.0f);
+    CHECK("grad src[5] = 1", ag_grad(t, src[5]), 1.0f);
+
+    ag_tape_free(t);
+}
+
 static void test_transpose(void) {
     section("transpose : A(2x3) -> At(3x2)");
     /*
@@ -340,12 +469,12 @@ static void test_transpose(void) {
 
     ag_transpose(t, A, 2, 3, At);
 
-    /* At est une reindexation des memes AgVal, pas de nouveaux noeuds */
+    /* At est stocke en row-major pour la forme 3x2 : [1,4,2,5,3,6] */
     CHECK("At[0,0] = A[0,0] = 1", ag_data(t, At[0]), 1.0f);
-    CHECK("At[1,0] = A[0,1] = 2", ag_data(t, At[1]), 2.0f);
-    CHECK("At[2,0] = A[0,2] = 3", ag_data(t, At[2]), 3.0f);
-    CHECK("At[0,1] = A[1,0] = 4", ag_data(t, At[3]), 4.0f);
-    CHECK("At[1,1] = A[1,1] = 5", ag_data(t, At[4]), 5.0f);
+    CHECK("At[0,1] = A[1,0] = 4", ag_data(t, At[1]), 4.0f);
+    CHECK("At[1,0] = A[0,1] = 2", ag_data(t, At[2]), 2.0f);
+    CHECK("At[1,1] = A[1,1] = 5", ag_data(t, At[3]), 5.0f);
+    CHECK("At[2,0] = A[0,2] = 3", ag_data(t, At[4]), 3.0f);
     CHECK("At[2,1] = A[1,2] = 6", ag_data(t, At[5]), 6.0f);
 
     ag_tape_free(t);
@@ -412,19 +541,24 @@ int main(void) {
     test_neg();
     test_pow();
     test_relu();
+    test_leaky_relu();
     test_tanh();
     test_sigmoid();
     test_exp();
     test_log();
+    test_square_abs_softplus();
 
     /* chain rule */
     test_chain_rule();
     test_shared_node();
+    test_backward_accumulation();
     test_mse_loss();
 
     /* ops tensorielles */
     test_sum();
     test_matmul();
+    test_broadcast_2d();
+    test_reduce_2d();
     test_transpose();
 
     /* memoire */

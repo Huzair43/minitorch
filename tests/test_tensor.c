@@ -253,6 +253,36 @@ void test_tensor_add_shape_mismatch() {
     tensor_free(b);
 }
 
+void test_tensor_add_broadcast_row_vector() {
+    TEST_HEADER("=== Test: tensor_add_broadcast_row_vector ===");
+
+    int shape_a[2] = {2, 3};
+    int shape_b[1] = {3};
+    Tensor* a = tensor_create(shape_a, 2);
+    Tensor* b = tensor_create(shape_b, 1);
+
+    a->data[0] = 1.0f; a->data[1] = 2.0f; a->data[2] = 3.0f;
+    a->data[3] = 4.0f; a->data[4] = 5.0f; a->data[5] = 6.0f;
+    b->data[0] = 10.0f; b->data[1] = 20.0f; b->data[2] = 30.0f;
+
+    Tensor* c = tensor_add(a, b);
+
+    ASSERT_NOT_NULL(c);
+    ASSERT_EQ(c->ndim, 2);
+    ASSERT_EQ(c->shape[0], 2);
+    ASSERT_EQ(c->shape[1], 3);
+    ASSERT_EQ_FLOAT(c->data[0], 11.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(c->data[1], 22.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(c->data[2], 33.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(c->data[3], 14.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(c->data[4], 25.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(c->data[5], 36.0f, 1e-6f);
+
+    tensor_free(a);
+    tensor_free(b);
+    tensor_free(c);
+}
+
 void test_tensor_sub() {
     TEST_HEADER("=== Test: tensor_sub ===");
     
@@ -317,6 +347,36 @@ void test_tensor_div() {
     tensor_free(a);
     tensor_free(b);
     tensor_free(c);
+}
+
+void test_tensor_sum_and_mean() {
+    TEST_HEADER("=== Test: tensor_sum_and_mean ===");
+
+    int shape[2] = {2, 3};
+    Tensor* t = tensor_create(shape, 2);
+    for (int i = 0; i < 6; i++) t->data[i] = (float)(i + 1);
+
+    Tensor* sum_axis0 = tensor_sum(t, 0);
+    Tensor* sum_axis1 = tensor_sum(t, 1);
+    Tensor* mean_axis1 = tensor_mean(t, 1);
+
+    ASSERT_NOT_NULL(sum_axis0);
+    ASSERT_NOT_NULL(sum_axis1);
+    ASSERT_NOT_NULL(mean_axis1);
+    ASSERT_EQ(sum_axis0->ndim, 1);
+    ASSERT_EQ(sum_axis0->shape[0], 3);
+    ASSERT_EQ_FLOAT(sum_axis0->data[0], 5.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(sum_axis0->data[1], 7.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(sum_axis0->data[2], 9.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(sum_axis1->data[0], 6.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(sum_axis1->data[1], 15.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(mean_axis1->data[0], 2.0f, 1e-6f);
+    ASSERT_EQ_FLOAT(mean_axis1->data[1], 5.0f, 1e-6f);
+
+    tensor_free(t);
+    tensor_free(sum_axis0);
+    tensor_free(sum_axis1);
+    tensor_free(mean_axis1);
 }
 
 /* ========== LINEAR ALGEBRA TESTS ========== */
@@ -472,9 +532,11 @@ int main() {
     printf("\n--- ELEMENTWISE OPERATION TESTS ---\n");
     test_tensor_add_basic();
     test_tensor_add_shape_mismatch();
+    test_tensor_add_broadcast_row_vector();
     test_tensor_sub();
     test_tensor_mul();
     test_tensor_div();
+    test_tensor_sum_and_mean();
     
     printf("\n--- LINEAR ALGEBRA TESTS ---\n");
     test_tensor_matmul_basic();

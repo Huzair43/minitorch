@@ -22,6 +22,8 @@ typedef struct AgEntry AgEntry;
 typedef void (*AgBackwardFn)(const AgEntry *e,
                               float        *grads,
                               int           out_idx);
+typedef AgVal (*AgUnaryFn)(AgTape *t, AgVal a);
+typedef AgVal (*AgBinaryFn)(AgTape *t, AgVal a, AgVal b);
 
 struct AgEntry {
     AgBackwardFn fn;
@@ -58,10 +60,15 @@ AgVal   ag_pow(AgTape *t, AgVal a, float exp);
 
 /* ── Activations ───────────────────────────────────────── */
 AgVal   ag_relu(AgTape *t, AgVal a);
+AgVal   ag_leaky_relu(AgTape *t, AgVal a, float negative_slope);
 AgVal   ag_tanh(AgTape *t, AgVal a);
 AgVal   ag_sigmoid(AgTape *t, AgVal a);
 AgVal   ag_exp(AgTape *t, AgVal a);
 AgVal   ag_log(AgTape *t, AgVal a);
+AgVal   ag_sqrt(AgTape *t, AgVal a);
+AgVal   ag_abs(AgTape *t, AgVal a);
+AgVal   ag_square(AgTape *t, AgVal a);
+AgVal   ag_softplus(AgTape *t, AgVal a);
 
 /* ── Ops tensorielles (sur tableaux de AgVal) ──────────── */
 
@@ -90,5 +97,21 @@ void    ag_matmul(AgTape *t,
 void    ag_transpose(AgTape *t,
                      const AgVal *A, int rows, int cols,
                      AgVal *At);
+
+/* ── Helpers tensoriels de haut niveau ─────────────────── */
+void    ag_tensor_copy(AgVal *dst, const AgVal *src, int n);
+void    ag_tensor_reshape_view(AgVal *dst, const AgVal *src, int n);
+void    ag_tensor_apply_unary(AgTape *t, const AgVal *src, int n, AgVal *dst, AgUnaryFn fn);
+void    ag_tensor_apply_binary(AgTape *t, const AgVal *lhs, const AgVal *rhs, int n, AgVal *dst, AgBinaryFn fn);
+void    ag_tensor_broadcast_binary_2d(AgTape *t,
+                                      const AgVal *lhs, int lhs_rows, int lhs_cols,
+                                      const AgVal *rhs, int rhs_rows, int rhs_cols,
+                                      AgVal *out, AgBinaryFn fn);
+void    ag_tensor_reduce_sum_2d(AgTape *t,
+                                const AgVal *src, int rows, int cols,
+                                int axis, AgVal *out);
+void    ag_tensor_reduce_mean_2d(AgTape *t,
+                                 const AgVal *src, int rows, int cols,
+                                 int axis, AgVal *out);
 
 #endif /* MINITORCH_AUTOGRAD_H */
