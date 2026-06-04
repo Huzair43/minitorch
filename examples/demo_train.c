@@ -3,6 +3,7 @@
 #include <math.h>
 #include "minitorch/core/autograd.h"
 #include "minitorch/nn/nn.h"
+#include "minitorch/optim/optim.h"
 
 #define MAX_SAMPLES 64
 #define MAX_FEATURES 8
@@ -80,7 +81,7 @@ static float predict_prob(AgTape* tape, const MtLinear* model, int idx) {
     return 1.0f / (1.0f + expf(-z));
 }
 
-static float train_sample(AgTape* tape, MtLinear* model, int idx, float lr) {
+static float train_sample(AgTape* tape, MtLinear* model, MtOptimizer* optim, int idx) {
     AgVal features[MAX_FEATURES];
     for (int f = 0; f < n_features; f++) {
         features[f] = ag_leaf(tape, X[idx][f]);
@@ -95,15 +96,15 @@ static float train_sample(AgTape* tape, MtLinear* model, int idx, float lr) {
     AgVal loss = mt_bce_loss(tape, pred, target, 1);
 
     float loss_value = ag_data(tape, loss);
-    ag_zero_grad(tape);
+    mt_optimizer_zero_grad(tape, optim);
     ag_backward(tape, loss);
-    mt_linear_step(tape, model, lr);
+    mt_optimizer_step(tape, optim);
     return loss_value;
 }
 
-static void train(AgTape* tape, MtLinear* model, int epochs, float lr) {
+static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, int epochs) {
     printf("\nEntraînement de la régression logistique\n");
-    printf("Modèle : Linear(%d, 1) + Sigmoid + BCE\n", n_features);
+    printf("Modèle : Linear(%d, 1) + Sigmoid + BCE + Adam\n", n_features);
     printf("Époque   Perte moy.\n");
     printf("-----------------\n");
 
@@ -114,7 +115,7 @@ static void train(AgTape* tape, MtLinear* model, int epochs, float lr) {
         float total_loss = 0.0f;
 
         for (int i = 0; i < n_samples; i++) {
-            float loss = train_sample(tape, model, i, lr);
+            float loss = train_sample(tape, model, optim, i);
             total_loss += loss;
         }
 
@@ -165,13 +166,16 @@ int main(void) {
     srand(42);
     AgTape* tape = ag_tape_create();
     MtLinear* model = mt_linear_create(tape, n_features, 1, 1);
-    if (!tape || !model) {
+    MtOptimizer* optim = mt_adam_create(lr, 0.9f, 0.999f, 1e-8f);
+    if (!tape || !model || !optim) {
         printf("Impossible de créer le modèle nn.\n");
+        mt_optimizer_free(optim);
         mt_linear_free(model);
         ag_tape_free(tape);
         return 1;
     }
     init_model(tape, model);
+    mt_optimizer_add_linear(optim, model);
 
     printf("\nPoids initiaux\n");
     for (int f = 0; f < n_features; f++) {
@@ -179,7 +183,7 @@ int main(void) {
     }
     printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
-    train(tape, model, epochs, lr);
+    train(tape, model, optim, epochs);
 
     printf("\nPoids entraînés\n");
     for (int f = 0; f < n_features; f++) {
@@ -188,6 +192,7 @@ int main(void) {
     printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
     print_results(tape, model, threshold);
+    mt_optimizer_free(optim);
     mt_linear_free(model);
     ag_tape_free(tape);
     return 0;

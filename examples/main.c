@@ -11,6 +11,7 @@
 #include "minitorch/core/tensor_linalg.h"
 #include "minitorch/core/autograd.h"
 #include "minitorch/nn/nn.h"
+#include "minitorch/optim/optim.h"
 
 static void configure_console(void) {
 #ifdef _WIN32
@@ -263,6 +264,39 @@ static void demo_nn_module(void) {
     ag_tape_free(tape);
 }
 
+static void demo_optim_module(void) {
+    print_title("Module optim");
+
+    AgTape* tape = ag_tape_create();
+    MtOptimizer* optim = mt_sgd_create(0.1f);
+    if (!tape || !optim) {
+        printf("Impossible de créer l'optimiseur.\n");
+        mt_optimizer_free(optim);
+        ag_tape_free(tape);
+        return;
+    }
+
+    AgVal w = ag_leaf(tape, 5.0f);
+    AgVal target = ag_leaf(tape, 3.0f);
+    mt_optimizer_add_param(optim, w);
+
+    AgVal diff = ag_sub(tape, w, target);
+    AgVal loss = ag_square(tape, diff);
+
+    printf("Objectif : minimiser (w - 3)^2 avec SGD\n");
+    printf("Avant : w = %.3f, perte = %.3f\n", ag_data(tape, w), ag_data(tape, loss));
+
+    mt_optimizer_zero_grad(tape, optim);
+    ag_backward(tape, loss);
+    printf("Gradient : dL/dw = %.3f\n", ag_grad(tape, w));
+
+    mt_optimizer_step(tape, optim);
+    printf("Après un step : w = %.3f\n", ag_data(tape, w));
+
+    mt_optimizer_free(optim);
+    ag_tape_free(tape);
+}
+
 static void print_menu(void) {
     printf("\nMenu de démo MiniTorch\n");
     printf("1. Bases des tenseurs\n");
@@ -271,6 +305,7 @@ static void print_menu(void) {
     printf("4. Chaîne autograd scalaire\n");
     printf("5. Aides autograd tensorielles\n");
     printf("6. Module nn\n");
+    printf("7. Module optim\n");
     printf("0. Quitter\n");
     printf("Choix : ");
 }
@@ -293,6 +328,7 @@ int main(void) {
             case 4: demo_scalar_autograd(); break;
             case 5: demo_tensor_autograd(); break;
             case 6: demo_nn_module(); break;
+            case 7: demo_optim_module(); break;
             case 0:
                 printf("Au revoir\n");
                 return 0;
