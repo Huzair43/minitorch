@@ -2,6 +2,7 @@
 #define MINITORCH_NN_H
 
 #include "minitorch/core/autograd.h"
+#include "minitorch/data/dataset.h"
 
 #ifndef MT_MAX_SEQ_LAYERS
 #  define MT_MAX_SEQ_LAYERS 16
@@ -39,6 +40,13 @@ typedef struct {
     AgVal *buffer_a;
     AgVal *buffer_b;
 } MtSequential;
+
+typedef struct {
+    float loss_mean;
+    float accuracy;
+    int correct;
+    int total;
+} MtEvalResult;
 
 MtLinear *mt_linear_create(AgTape *t, int in_features, int out_features, int use_bias);
 void      mt_linear_free(MtLinear *layer);
@@ -82,5 +90,19 @@ float     mt_mean(const float *values, int n);
 float     mt_accuracy_binary(const float *pred, const float *target, int n, float threshold);
 float     mt_accuracy_multiclass(const int *pred, const int *target, int n);
 void      mt_confusion_matrix(const int *pred, const int *target, int n, int n_classes, int *matrix);
+
+int       mt_eval_binary_linear(AgTape *t,
+                                const MtLinear *model,
+                                int graph_checkpoint,
+                                const MtDataset *dataset,
+                                float threshold,
+                                MtEvalResult *result);
+int       mt_eval_multiclass_linear(AgTape *t,
+                                    const MtLinear *model,
+                                    int graph_checkpoint,
+                                    const MtDataset *dataset,
+                                    int n_classes,
+                                    MtEvalResult *result,
+                                    int *confusion_matrix);
 
 #endif /* MINITORCH_NN_H */

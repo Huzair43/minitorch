@@ -82,6 +82,7 @@ Le module `nn` ajoute des briques de réseau:
 - `CrossEntropyFromLogits`
 - initialisations `zeros`, `Xavier uniform` et `He uniform`
 - métriques simples: `argmax`, moyenne, exactitude et matrice de confusion
+- évaluation simple de modèles `Linear`
 
 Exemple simple:
 
@@ -125,6 +126,8 @@ Le module `data` permet de travailler avec:
 - `MtBatch`
 - mini-batches
 - shuffle
+- split train, validation et test
+- chargement CSV simple
 
 Exemple:
 
@@ -135,6 +138,25 @@ MtBatch* batch = mt_batch_create(batch_size, n_features);
 mt_dataset_shuffle(dataset);
 int count = mt_dataset_get_batch(dataset, 0, batch_size, batch);
 ```
+
+Split d'un dataset:
+
+```c
+MtDataset* train = NULL;
+MtDataset* val = NULL;
+MtDataset* test = NULL;
+
+mt_dataset_split(dataset, 0.7f, 0.15f, &train, &val, &test);
+```
+
+Chargement CSV:
+
+```c
+MtDataset* dataset = mt_dataset_load_csv("data.csv", 2, 1);
+```
+
+Dans ce format, les colonnes de features viennent d'abord. La dernière colonne est le label.
+Le dernier argument indique si le fichier contient une ligne d'en-tête.
 
 ### Sauvegarde des poids
 
@@ -201,12 +223,15 @@ Menu interactif qui montre les bases du projet:
 - module `optim`
 - sauvegarde de modèle
 - softmax et cross-entropy
+- pipeline complet avec dataset fictif CSV
 
 Lancement:
 
 ```bash
 ./example
 ```
+
+Dans le menu, l'option `10` charge `examples/datasets/dataset_fictif_binaire.csv`. Tu peux choisir les pourcentages train, validation et test, puis choisir entre une régression logistique et un petit MLP.
 
 ### `demo_train`
 
@@ -222,6 +247,7 @@ Elle utilise:
 - `Adam`
 - exactitude
 - checkpoint et rewind du tape
+- évaluation du modèle après entraînement
 
 Lancement:
 
@@ -267,6 +293,7 @@ CrossEntropyFromLogits
 
 `Softmax` reste utilisé pour afficher les probabilités finales.
 La démo affiche aussi l'exactitude et une petite matrice de confusion.
+Elle utilise l'API d'évaluation pour calculer la perte moyenne et les métriques.
 
 Lancement:
 
@@ -352,8 +379,6 @@ MiniTorch reste volontairement simple. Il manque encore plusieurs éléments imp
 - softmax avec stabilité numérique renforcée pour les très grands logits
 - vraie API de module plus proche de PyTorch
 - initialisations plus nombreuses
-- séparation train/test
-- chargement de datasets depuis fichiers
 - sauvegarde plus robuste avec versionnement plus strict
 - gestion mémoire plus avancée
 
@@ -361,22 +386,12 @@ MiniTorch reste volontairement simple. Il manque encore plusieurs éléments imp
 
 Les prochaines étapes possibles:
 
-1. Ajouter un vrai split de dataset:
-   - train
-   - validation
-   - test
-
-2. Ajouter une API d'évaluation:
-   - évaluer un modèle sans entraîner
-   - afficher les prédictions
-   - comparer train et validation
-
-3. Nettoyer l'API publique:
+1. Nettoyer l'API publique:
    - noms plus cohérents
    - erreurs mieux signalées
    - documentation par fonction
 
-4. Rendre l'autograd plus tensoriel:
+2. Rendre l'autograd plus tensoriel:
    - gradients de `matmul`
    - gradients de `sum`
    - gradients de broadcasting

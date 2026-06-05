@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 #include "minitorch/data/dataset.h"
 
 static int _passed = 0;
@@ -95,12 +96,80 @@ static void test_invalid_inputs(void) {
     mt_dataset_free(dataset);
 }
 
+static void test_dataset_split(void) {
+    section("Dataset : split train val test");
+
+    float x[] = {
+        1.0f, 10.0f,
+        2.0f, 20.0f,
+        3.0f, 30.0f,
+        4.0f, 40.0f,
+        5.0f, 50.0f
+    };
+    float y[] = {0.0f, 1.0f, 0.0f, 1.0f, 1.0f};
+
+    MtDataset *dataset = mt_dataset_create(x, y, 5, 2);
+    MtDataset *train = NULL;
+    MtDataset *val = NULL;
+    MtDataset *test = NULL;
+
+    int ok = mt_dataset_split(dataset, 0.6f, 0.2f, &train, &val, &test);
+
+    CHECK("split accepte", (float)ok, 1.0f);
+    if (ok) {
+        CHECK("train taille", (float)train->n_samples, 3.0f);
+        CHECK("val taille", (float)val->n_samples, 1.0f);
+        CHECK("test taille", (float)test->n_samples, 1.0f);
+        CHECK("train x[2,0]", mt_dataset_feature(train, 2, 0), 3.0f);
+        CHECK("val x[0,0]", mt_dataset_feature(val, 0, 0), 4.0f);
+        CHECK("test y[0]", mt_dataset_label(test, 0), 1.0f);
+    }
+
+    mt_dataset_free(train);
+    mt_dataset_free(val);
+    mt_dataset_free(test);
+    mt_dataset_free(dataset);
+}
+
+static void test_dataset_load_csv(void) {
+    section("Dataset : chargement CSV");
+
+    const char *path = "test_dataset_load.csv";
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        CHECK("creation fichier CSV", 0.0f, 1.0f);
+        return;
+    }
+
+    fprintf(file, "x1,x2,y\n");
+    fprintf(file, "1.0,2.0,0.0\n");
+    fprintf(file, "3.5,4.5,1.0\n");
+    fprintf(file, "5.0;6.0;1.0\n");
+    fclose(file);
+
+    MtDataset *dataset = mt_dataset_load_csv(path, 2, 1);
+
+    CHECK("csv charge", dataset != NULL ? 1.0f : 0.0f, 1.0f);
+    if (dataset) {
+        CHECK("csv n_samples", (float)dataset->n_samples, 3.0f);
+        CHECK("csv n_features", (float)dataset->n_features, 2.0f);
+        CHECK("csv x[1,0]", mt_dataset_feature(dataset, 1, 0), 3.5f);
+        CHECK("csv x[2,1]", mt_dataset_feature(dataset, 2, 1), 6.0f);
+        CHECK("csv y[2]", mt_dataset_label(dataset, 2), 1.0f);
+    }
+
+    mt_dataset_free(dataset);
+    remove(path);
+}
+
 int main(void) {
     printf("test_data : suite complete\n");
 
     test_dataset_access();
     test_batch_extraction();
     test_invalid_inputs();
+    test_dataset_split();
+    test_dataset_load_csv();
 
     summary();
     return _failed == 0 ? 0 : 1;

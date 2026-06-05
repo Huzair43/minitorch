@@ -17,8 +17,15 @@ typedef struct {
 } MtBatch;
 
 MtDataset *mt_dataset_create(const float *x, const float *y, int n_samples, int n_features);
+MtDataset *mt_dataset_load_csv(const char *path, int n_features, int has_header);
 void       mt_dataset_free(MtDataset *dataset);
 void       mt_dataset_shuffle(MtDataset *dataset);
+int        mt_dataset_split(const MtDataset *dataset,
+                            float train_ratio,
+                            float val_ratio,
+                            MtDataset **train,
+                            MtDataset **val,
+                            MtDataset **test);
 int        mt_dataset_num_batches(const MtDataset *dataset, int batch_size);
 int        mt_dataset_get_batch(const MtDataset *dataset, int batch_index, int batch_size, MtBatch *batch);
 float      mt_dataset_feature(const MtDataset *dataset, int sample_idx, int feature_idx);

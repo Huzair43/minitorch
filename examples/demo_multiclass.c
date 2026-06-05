@@ -150,8 +150,6 @@ int main(void) {
     printf("x0     x1     classe vraie   p0      p1      p2      classe\n");
     printf("----------------------------------------------------------\n");
 
-    int preds[N_SAMPLES];
-    int targets[N_SAMPLES];
     for (int i = 0; i < N_SAMPLES; i++) {
         AgVal probs[N_CLASSES];
         float x0 = mt_dataset_feature(dataset, i, 0);
@@ -159,8 +157,6 @@ int main(void) {
         int label = (int)mt_dataset_label(dataset, i);
         predict_one(tape, model, graph_checkpoint, x0, x1, probs);
         int pred = mt_argmax(tape, probs, N_CLASSES);
-        preds[i] = pred;
-        targets[i] = label;
         printf("%-6.1f %-6.1f %-13d %.3f   %.3f   %.3f   %d\n",
                x0, x1, label,
                ag_data(tape, probs[0]),
@@ -170,16 +166,19 @@ int main(void) {
     }
 
     int confusion[N_CLASSES * N_CLASSES];
-    float accuracy = mt_accuracy_multiclass(preds, targets, N_SAMPLES);
-    mt_confusion_matrix(preds, targets, N_SAMPLES, N_CLASSES, confusion);
+    MtEvalResult eval;
+    int ok_eval = mt_eval_multiclass_linear(tape, model, graph_checkpoint, dataset, N_CLASSES, &eval, confusion);
 
-    printf("Exactitude : %.2f %%\n", accuracy * 100.0f);
-    printf("\nMatrice de confusion (lignes=vrai, colonnes=prédit)\n");
-    for (int row = 0; row < N_CLASSES; row++) {
-        for (int col = 0; col < N_CLASSES; col++) {
-            printf("%4d", confusion[row * N_CLASSES + col]);
+    if (ok_eval) {
+        printf("Perte moyenne : %.6f\n", eval.loss_mean);
+        printf("Exactitude : %.2f %% (%d/%d)\n", eval.accuracy * 100.0f, eval.correct, eval.total);
+        printf("\nMatrice de confusion (lignes=vrai, colonnes=prédit)\n");
+        for (int row = 0; row < N_CLASSES; row++) {
+            for (int col = 0; col < N_CLASSES; col++) {
+                printf("%4d", confusion[row * N_CLASSES + col]);
+            }
+            printf("\n");
         }
-        printf("\n");
     }
 
     mt_optimizer_free(optim);

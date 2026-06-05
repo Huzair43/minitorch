@@ -522,3 +522,112 @@ void mt_confusion_matrix(const int *pred, const int *target, int n, int n_classe
         }
     }
 }
+
+int mt_eval_binary_linear(AgTape *t,
+                          const MtLinear *model,
+                          int graph_checkpoint,
+                          const MtDataset *dataset,
+                          float threshold,
+                          MtEvalResult *result) {
+    if (!t || !model || !dataset || !result || model->out_features != 1) {
+        return 0;
+    }
+    if (dataset->n_samples <= 0 || dataset->n_features != model->in_features) {
+        return 0;
+    }
+
+    float total_loss = 0.0f;
+    int correct = 0;
+
+    for (int i = 0; i < dataset->n_samples; i++) {
+        ag_rewind(t, graph_checkpoint);
+
+        AgVal input[model->in_features];
+        for (int f = 0; f < model->in_features; f++) {
+            input[f] = ag_leaf(t, mt_dataset_feature(dataset, i, f));
+        }
+
+        AgVal logits[1];
+        AgVal pred[1];
+        AgVal target[1];
+        mt_linear_forward(t, model, input, logits);
+        mt_sigmoid(t, logits, 1, pred);
+        target[0] = ag_leaf(t, mt_dataset_label(dataset, i));
+
+        AgVal loss = mt_bce_loss(t, pred, target, 1);
+        total_loss += ag_data(t, loss);
+
+        int pred_class = ag_data(t, pred[0]) >= threshold ? 1 : 0;
+        int target_class = mt_dataset_label(dataset, i) >= 0.5f ? 1 : 0;
+        if (pred_class == target_class) {
+            correct++;
+        }
+    }
+
+    result->loss_mean = total_loss / (float)dataset->n_samples;
+    result->accuracy = (float)correct / (float)dataset->n_samples;
+    result->correct = correct;
+    result->total = dataset->n_samples;
+    ag_rewind(t, graph_checkpoint);
+    return 1;
+}
+
+int mt_eval_multiclass_linear(AgTape *t,
+                              const MtLinear *model,
+                              int graph_checkpoint,
+                              const MtDataset *dataset,
+                              int n_classes,
+                              MtEvalResult *result,
+                              int *confusion_matrix) {
+    if (!t || !model || !dataset || !result || n_classes <= 0) {
+        return 0;
+    }
+    if (dataset->n_samples <= 0 || dataset->n_features != model->in_features || model->out_features != n_classes) {
+        return 0;
+    }
+
+    if (confusion_matrix) {
+        for (int i = 0; i < n_classes * n_classes; i++) {
+            confusion_matrix[i] = 0;
+        }
+    }
+
+    float total_loss = 0.0f;
+    int correct = 0;
+
+    for (int i = 0; i < dataset->n_samples; i++) {
+        ag_rewind(t, graph_checkpoint);
+
+        AgVal input[model->in_features];
+        for (int f = 0; f < model->in_features; f++) {
+            input[f] = ag_leaf(t, mt_dataset_feature(dataset, i, f));
+        }
+
+        AgVal logits[n_classes];
+        AgVal target[n_classes];
+        int label = (int)mt_dataset_label(dataset, i);
+
+        mt_linear_forward(t, model, input, logits);
+        for (int c = 0; c < n_classes; c++) {
+            target[c] = ag_leaf(t, c == label ? 1.0f : 0.0f);
+        }
+
+        AgVal loss = mt_cross_entropy_from_logits(t, logits, target, n_classes);
+        int pred = mt_argmax(t, logits, n_classes);
+        total_loss += ag_data(t, loss);
+
+        if (pred == label) {
+            correct++;
+        }
+        if (confusion_matrix && label >= 0 && label < n_classes && pred >= 0 && pred < n_classes) {
+            confusion_matrix[label * n_classes + pred]++;
+        }
+    }
+
+    result->loss_mean = total_loss / (float)dataset->n_samples;
+    result->accuracy = (float)correct / (float)dataset->n_samples;
+    result->correct = correct;
+    result->total = dataset->n_samples;
+    ag_rewind(t, graph_checkpoint);
+    return 1;
+}

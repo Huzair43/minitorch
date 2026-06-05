@@ -250,6 +250,69 @@ static void test_metrics_confusion_matrix(void) {
     CHECK("confusion[2,2]", (float)matrix[8], 1.0f);
 }
 
+static void test_eval_binary_linear(void) {
+    section("Évaluation : Linear binaire");
+
+    float x[2] = {0.0f, 1.0f};
+    float y[2] = {0.0f, 1.0f};
+
+    AgTape *t = ag_tape_create();
+    MtDataset *dataset = mt_dataset_create(x, y, 2, 1);
+    MtLinear *model = mt_linear_create(t, 1, 1, 1);
+
+    mt_linear_set_weight(t, model, 0, 0, 10.0f);
+    mt_linear_set_bias(t, model, 0, -5.0f);
+    int graph_checkpoint = ag_checkpoint(t);
+
+    MtEvalResult eval;
+    int ok = mt_eval_binary_linear(t, model, graph_checkpoint, dataset, 0.5f, &eval);
+
+    CHECK("eval binaire accepte", (float)ok, 1.0f);
+    CHECK("eval binaire total", (float)eval.total, 2.0f);
+    CHECK("eval binaire correct", (float)eval.correct, 2.0f);
+    CHECK("eval binaire exactitude", eval.accuracy, 1.0f);
+    CHECK("eval binaire perte basse", eval.loss_mean < 0.01f ? 1.0f : 0.0f, 1.0f);
+
+    mt_linear_free(model);
+    mt_dataset_free(dataset);
+    ag_tape_free(t);
+}
+
+static void test_eval_multiclass_linear(void) {
+    section("Évaluation : Linear multi-classe");
+
+    float x[3] = {-2.0f, 0.0f, 2.0f};
+    float y[3] = {0.0f, 1.0f, 2.0f};
+
+    AgTape *t = ag_tape_create();
+    MtDataset *dataset = mt_dataset_create(x, y, 3, 1);
+    MtLinear *model = mt_linear_create(t, 1, 3, 1);
+
+    mt_linear_set_weight(t, model, 0, 0, -1.0f);
+    mt_linear_set_bias(t, model, 0, 0.0f);
+    mt_linear_set_weight(t, model, 1, 0, 0.0f);
+    mt_linear_set_bias(t, model, 1, 1.0f);
+    mt_linear_set_weight(t, model, 2, 0, 1.0f);
+    mt_linear_set_bias(t, model, 2, 0.0f);
+    int graph_checkpoint = ag_checkpoint(t);
+
+    MtEvalResult eval;
+    int confusion[9];
+    int ok = mt_eval_multiclass_linear(t, model, graph_checkpoint, dataset, 3, &eval, confusion);
+
+    CHECK("eval multi accepte", (float)ok, 1.0f);
+    CHECK("eval multi total", (float)eval.total, 3.0f);
+    CHECK("eval multi correct", (float)eval.correct, 3.0f);
+    CHECK("eval multi exactitude", eval.accuracy, 1.0f);
+    CHECK("eval multi confusion[0,0]", (float)confusion[0], 1.0f);
+    CHECK("eval multi confusion[1,1]", (float)confusion[4], 1.0f);
+    CHECK("eval multi confusion[2,2]", (float)confusion[8], 1.0f);
+
+    mt_linear_free(model);
+    mt_dataset_free(dataset);
+    ag_tape_free(t);
+}
+
 int main(void) {
     printf("test_nn : suite complete\n");
 
@@ -263,6 +326,8 @@ int main(void) {
     test_metrics_argmax_and_mean();
     test_metrics_accuracy();
     test_metrics_confusion_matrix();
+    test_eval_binary_linear();
+    test_eval_multiclass_linear();
 
     summary();
     return _failed == 0 ? 0 : 1;

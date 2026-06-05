@@ -135,24 +135,23 @@ static void train(AgTape* tape, MtLinear* model, MtOptimizer* optim, int graph_c
     }
 }
 
-static void print_results(AgTape* tape, const MtLinear* model, const MtDataset* dataset, float threshold) {
+static void print_results(AgTape* tape, const MtLinear* model, int graph_checkpoint, const MtDataset* dataset, float threshold) {
     printf("\nPrédictions finales (seuil = %.2f)\n", threshold);
     printf("exemple  y_vrai   proba    classe\n");
     printf("--------------------------------\n");
 
-    float probs[MAX_SAMPLES];
-    float labels[MAX_SAMPLES];
     for (int i = 0; i < n_samples; i++) {
         float prob = predict_prob(tape, model, dataset, i);
         int pred = prob >= threshold ? 1 : 0;
         float label = mt_dataset_label(dataset, i);
-        probs[i] = prob;
-        labels[i] = label;
         printf("%-8d %-8.1f %-8.4f %d\n", i + 1, label, prob, pred);
     }
 
-    float accuracy = mt_accuracy_binary(probs, labels, n_samples, threshold);
-    printf("Exactitude : %.2f %%\n", accuracy * 100.0f);
+    MtEvalResult eval;
+    if (mt_eval_binary_linear(tape, model, graph_checkpoint, dataset, threshold, &eval)) {
+        printf("Perte moyenne : %.6f\n", eval.loss_mean);
+        printf("Exactitude : %.2f %% (%d/%d)\n", eval.accuracy * 100.0f, eval.correct, eval.total);
+    }
 }
 
 int main(void) {
@@ -212,7 +211,7 @@ int main(void) {
     }
     printf("  b  = %.4f\n", ag_data(tape, mt_linear_bias(model, 0)));
 
-    print_results(tape, model, dataset, threshold);
+    print_results(tape, model, graph_checkpoint, dataset, threshold);
     mt_optimizer_free(optim);
     mt_linear_free(model);
     mt_batch_free(batch);
