@@ -61,19 +61,6 @@ static void predict_one(AgTape* tape, MtLinear* model, int graph_checkpoint, flo
     mt_softmax(tape, logits, N_CLASSES, probs);
 }
 
-static int argmax(AgTape* tape, const AgVal* probs) {
-    int best = 0;
-    float best_value = ag_data(tape, probs[0]);
-    for (int i = 1; i < N_CLASSES; i++) {
-        float value = ag_data(tape, probs[i]);
-        if (value > best_value) {
-            best = i;
-            best_value = value;
-        }
-    }
-    return best;
-}
-
 int main(void) {
     float x[] = {
         -2.0f, -2.0f,
@@ -163,15 +150,17 @@ int main(void) {
     printf("x0     x1     classe vraie   p0      p1      p2      classe\n");
     printf("----------------------------------------------------------\n");
 
-    int correct = 0;
+    int preds[N_SAMPLES];
+    int targets[N_SAMPLES];
     for (int i = 0; i < N_SAMPLES; i++) {
         AgVal probs[N_CLASSES];
         float x0 = mt_dataset_feature(dataset, i, 0);
         float x1 = mt_dataset_feature(dataset, i, 1);
         int label = (int)mt_dataset_label(dataset, i);
         predict_one(tape, model, graph_checkpoint, x0, x1, probs);
-        int pred = argmax(tape, probs);
-        if (pred == label) correct++;
+        int pred = mt_argmax(tape, probs, N_CLASSES);
+        preds[i] = pred;
+        targets[i] = label;
         printf("%-6.1f %-6.1f %-13d %.3f   %.3f   %.3f   %d\n",
                x0, x1, label,
                ag_data(tape, probs[0]),
@@ -180,7 +169,18 @@ int main(void) {
                pred);
     }
 
-    printf("Précision : %d/%d\n", correct, N_SAMPLES);
+    int confusion[N_CLASSES * N_CLASSES];
+    float accuracy = mt_accuracy_multiclass(preds, targets, N_SAMPLES);
+    mt_confusion_matrix(preds, targets, N_SAMPLES, N_CLASSES, confusion);
+
+    printf("Exactitude : %.2f %%\n", accuracy * 100.0f);
+    printf("\nMatrice de confusion (lignes=vrai, colonnes=prédit)\n");
+    for (int row = 0; row < N_CLASSES; row++) {
+        for (int col = 0; col < N_CLASSES; col++) {
+            printf("%4d", confusion[row * N_CLASSES + col]);
+        }
+        printf("\n");
+    }
 
     mt_optimizer_free(optim);
     mt_linear_free(model);

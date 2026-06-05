@@ -76,4 +76,11 @@ AgVal     mt_bce_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
 AgVal     mt_cross_entropy_loss(AgTape *t, const AgVal *probs, const AgVal *target, int n);
 AgVal     mt_cross_entropy_from_logits(AgTape *t, const AgVal *logits, const AgVal *target, int n);
 
+int       mt_argmax_values(const float *values, int n);
+int       mt_argmax(AgTape *t, const AgVal *values, int n);
+float     mt_mean(const float *values, int n);
+float     mt_accuracy_binary(const float *pred, const float *target, int n, float threshold);
+float     mt_accuracy_multiclass(const int *pred, const int *target, int n);
+void      mt_confusion_matrix(const int *pred, const int *target, int n, int n_classes, int *matrix);
+
 #endif /* MINITORCH_NN_H */

@@ -425,3 +425,100 @@ AgVal mt_cross_entropy_from_logits(AgTape *t, const AgVal *logits, const AgVal *
     free(shifted_exp);
     return ag_sub(t, log_sum_exp, target_logit);
 }
+
+int mt_argmax_values(const float *values, int n) {
+    if (!values || n <= 0) {
+        return -1;
+    }
+
+    int best = 0;
+    float best_value = values[0];
+    for (int i = 1; i < n; i++) {
+        if (values[i] > best_value) {
+            best = i;
+            best_value = values[i];
+        }
+    }
+    return best;
+}
+
+int mt_argmax(AgTape *t, const AgVal *values, int n) {
+    if (!t || !values || n <= 0) {
+        return -1;
+    }
+
+    int best = 0;
+    float best_value = ag_data(t, values[0]);
+    for (int i = 1; i < n; i++) {
+        float value = ag_data(t, values[i]);
+        if (value > best_value) {
+            best = i;
+            best_value = value;
+        }
+    }
+    return best;
+}
+
+float mt_mean(const float *values, int n) {
+    if (!values || n <= 0) {
+        return 0.0f;
+    }
+
+    float total = 0.0f;
+    for (int i = 0; i < n; i++) {
+        total += values[i];
+    }
+    return total / (float)n;
+}
+
+float mt_accuracy_binary(const float *pred, const float *target, int n, float threshold) {
+    if (!pred || !target || n <= 0) {
+        return 0.0f;
+    }
+
+    int correct = 0;
+    for (int i = 0; i < n; i++) {
+        int pred_class = pred[i] >= threshold ? 1 : 0;
+        int target_class = target[i] >= 0.5f ? 1 : 0;
+        if (pred_class == target_class) {
+            correct++;
+        }
+    }
+    return (float)correct / (float)n;
+}
+
+float mt_accuracy_multiclass(const int *pred, const int *target, int n) {
+    if (!pred || !target || n <= 0) {
+        return 0.0f;
+    }
+
+    int correct = 0;
+    for (int i = 0; i < n; i++) {
+        if (pred[i] == target[i]) {
+            correct++;
+        }
+    }
+    return (float)correct / (float)n;
+}
+
+void mt_confusion_matrix(const int *pred, const int *target, int n, int n_classes, int *matrix) {
+    if (!matrix || n_classes <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < n_classes * n_classes; i++) {
+        matrix[i] = 0;
+    }
+
+    if (!pred || !target || n <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < n; i++) {
+        int truth = target[i];
+        int guess = pred[i];
+        if (truth >= 0 && truth < n_classes && guess >= 0 && guess < n_classes) {
+            matrix[truth * n_classes + guess]++;
+        }
+    }
+}

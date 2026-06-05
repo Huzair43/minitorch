@@ -206,6 +206,50 @@ static void test_linear_init_he_uniform(void) {
     ag_tape_free(t);
 }
 
+static void test_metrics_argmax_and_mean(void) {
+    section("Métriques : argmax et moyenne");
+
+    AgTape *t = ag_tape_create();
+    AgVal values[3] = {
+        ag_leaf(t, -1.0f),
+        ag_leaf(t, 3.0f),
+        ag_leaf(t, 2.0f)
+    };
+    float losses[3] = {1.0f, 2.0f, 4.0f};
+
+    CHECK("argmax AgVal = 1", (float)mt_argmax(t, values, 3), 1.0f);
+    CHECK("moyenne = 7/3", mt_mean(losses, 3), 7.0f / 3.0f);
+
+    ag_tape_free(t);
+}
+
+static void test_metrics_accuracy(void) {
+    section("Métriques : exactitude");
+
+    float probs[4] = {0.1f, 0.8f, 0.7f, 0.4f};
+    float binary_target[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+    int pred[5] = {0, 2, 1, 1, 2};
+    int target[5] = {0, 1, 1, 1, 2};
+
+    CHECK("exactitude binaire = 3/4", mt_accuracy_binary(probs, binary_target, 4, 0.5f), 0.75f);
+    CHECK("exactitude multi = 4/5", mt_accuracy_multiclass(pred, target, 5), 0.8f);
+}
+
+static void test_metrics_confusion_matrix(void) {
+    section("Métriques : matrice de confusion");
+
+    int pred[5] = {0, 2, 1, 1, 2};
+    int target[5] = {0, 1, 1, 1, 2};
+    int matrix[9];
+
+    mt_confusion_matrix(pred, target, 5, 3, matrix);
+
+    CHECK("confusion[0,0]", (float)matrix[0], 1.0f);
+    CHECK("confusion[1,1]", (float)matrix[4], 2.0f);
+    CHECK("confusion[1,2]", (float)matrix[5], 1.0f);
+    CHECK("confusion[2,2]", (float)matrix[8], 1.0f);
+}
+
 int main(void) {
     printf("test_nn : suite complete\n");
 
@@ -216,6 +260,9 @@ int main(void) {
     test_linear_init_zeros();
     test_linear_init_xavier_uniform();
     test_linear_init_he_uniform();
+    test_metrics_argmax_and_mean();
+    test_metrics_accuracy();
+    test_metrics_confusion_matrix();
 
     summary();
     return _failed == 0 ? 0 : 1;

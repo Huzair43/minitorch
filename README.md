@@ -81,6 +81,7 @@ Le module `nn` ajoute des briques de réseau:
 - `CrossEntropyLoss`
 - `CrossEntropyFromLogits`
 - initialisations `zeros`, `Xavier uniform` et `He uniform`
+- métriques simples: `argmax`, moyenne, exactitude et matrice de confusion
 
 Exemple simple:
 
@@ -219,6 +220,7 @@ Elle utilise:
 - `Sigmoid`
 - `BCELoss`
 - `Adam`
+- exactitude
 - checkpoint et rewind du tape
 
 Lancement:
@@ -264,6 +266,7 @@ CrossEntropyFromLogits
 ```
 
 `Softmax` reste utilisé pour afficher les probabilités finales.
+La démo affiche aussi l'exactitude et une petite matrice de confusion.
 
 Lancement:
 
@@ -363,22 +366,17 @@ Les prochaines étapes possibles:
    - validation
    - test
 
-2. Ajouter des métriques:
-   - accuracy
-   - loss moyenne
-   - matrice de confusion simple
-
-3. Ajouter une API d'évaluation:
+2. Ajouter une API d'évaluation:
    - évaluer un modèle sans entraîner
    - afficher les prédictions
    - comparer train et validation
 
-4. Nettoyer l'API publique:
+3. Nettoyer l'API publique:
    - noms plus cohérents
    - erreurs mieux signalées
    - documentation par fonction
 
-5. Rendre l'autograd plus tensoriel:
+4. Rendre l'autograd plus tensoriel:
    - gradients de `matmul`
    - gradients de `sum`
    - gradients de broadcasting

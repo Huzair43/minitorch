@@ -37,19 +37,6 @@ static void summary(void) {
     printf("==============================================\n");
 }
 
-static int argmax(AgTape* tape, const AgVal* probs, int n) {
-    int best = 0;
-    float best_value = ag_data(tape, probs[0]);
-    for (int i = 1; i < n; i++) {
-        float value = ag_data(tape, probs[i]);
-        if (value > best_value) {
-            best = i;
-            best_value = value;
-        }
-    }
-    return best;
-}
-
 static void test_softmax_distribution(void) {
     section("Softmax : distribution");
 
@@ -65,7 +52,7 @@ static void test_softmax_distribution(void) {
 
     float sum = ag_data(tape, probs[0]) + ag_data(tape, probs[1]) + ag_data(tape, probs[2]);
     CHECK("somme softmax = 1", sum, 1.0f);
-    CHECK("classe max = 2", (float)argmax(tape, probs, 3), 2.0f);
+    CHECK("classe max = 2", (float)mt_argmax(tape, probs, 3), 2.0f);
 
     ag_tape_free(tape);
 }
@@ -192,7 +179,8 @@ static void test_multiclass_training(void) {
 
     CHECK("la perte baisse", last_loss < first_loss ? 1.0f : 0.0f, 1.0f);
 
-    int correct = 0;
+    int preds[6];
+    int targets[6];
     for (int i = 0; i < dataset->n_samples; i++) {
         ag_rewind(tape, graph_checkpoint);
         AgVal input[2] = {
@@ -203,12 +191,11 @@ static void test_multiclass_training(void) {
         AgVal probs[N_CLASSES];
         mt_linear_forward(tape, model, input, logits);
         mt_softmax(tape, logits, N_CLASSES, probs);
-        int pred = argmax(tape, probs, N_CLASSES);
-        int truth = (int)mt_dataset_label(dataset, i);
-        if (pred == truth) correct++;
+        preds[i] = mt_argmax(tape, probs, N_CLASSES);
+        targets[i] = (int)mt_dataset_label(dataset, i);
     }
 
-    CHECK("classification 6/6", (float)correct, 6.0f);
+    CHECK("classification 6/6", mt_accuracy_multiclass(preds, targets, 6), 1.0f);
 
     mt_optimizer_free(optim);
     mt_linear_free(model);

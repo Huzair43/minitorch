@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "minitorch/core/autograd.h"
 #include "minitorch/data/dataset.h"
 #include "minitorch/nn/nn.h"
@@ -139,19 +140,19 @@ static void print_results(AgTape* tape, const MtLinear* model, const MtDataset* 
     printf("exemple  y_vrai   proba    classe\n");
     printf("--------------------------------\n");
 
-    int correct = 0;
+    float probs[MAX_SAMPLES];
+    float labels[MAX_SAMPLES];
     for (int i = 0; i < n_samples; i++) {
         float prob = predict_prob(tape, model, dataset, i);
         int pred = prob >= threshold ? 1 : 0;
         float label = mt_dataset_label(dataset, i);
-        int truth = label >= 0.5f ? 1 : 0;
-        if (pred == truth) {
-            correct++;
-        }
+        probs[i] = prob;
+        labels[i] = label;
         printf("%-8d %-8.1f %-8.4f %d\n", i + 1, label, prob, pred);
     }
 
-    printf("Précision : %d/%d\n", correct, n_samples);
+    float accuracy = mt_accuracy_binary(probs, labels, n_samples, threshold);
+    printf("Exactitude : %.2f %%\n", accuracy * 100.0f);
 }
 
 int main(void) {
