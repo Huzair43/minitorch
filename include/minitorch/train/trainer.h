@@ -30,4 +30,13 @@ int mt_trainer_train_binary(AgTape *t,
                             const MtTrainConfig *config,
                             MtTrainHistory *history);
 
+int mt_trainer_train_multiclass(AgTape *t,
+                                MtModel *model,
+                                MtOptimizer *optim,
+                                const MtLoss *loss,
+                                int graph_checkpoint,
+                                MtDataset *train,
+                                const MtTrainConfig *config,
+                                MtTrainHistory *history);
+
 #endif /* MINITORCH_TRAINER_H */

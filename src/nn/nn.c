@@ -723,6 +723,65 @@ MtModel *mt_model_create_mlp_binary(AgTape *t, int input_size, int hidden_size) 
     return model;
 }
 
+MtModel *mt_model_create_linear_multiclass(AgTape *t, int input_size, int n_classes) {
+    if (!t || input_size <= 0 || n_classes <= 1) {
+        return NULL;
+    }
+
+    MtModel *model = (MtModel *)calloc(1, sizeof(MtModel));
+    if (!model) {
+        return NULL;
+    }
+
+    model->kind = MT_MODEL_LINEAR_MULTICLASS;
+    model->input_size = input_size;
+    model->hidden_size = 0;
+    model->output_size = n_classes;
+    model->linear = mt_linear_create(t, input_size, n_classes, 1);
+    if (!model->linear) {
+        mt_model_free(model);
+        return NULL;
+    }
+
+    mt_linear_init_xavier_uniform(t, model->linear);
+    return model;
+}
+
+MtModel *mt_model_create_mlp_multiclass(AgTape *t, int input_size, int hidden_size, int n_classes) {
+    if (!t || input_size <= 0 || hidden_size <= 0 || n_classes <= 1) {
+        return NULL;
+    }
+
+    MtModel *model = (MtModel *)calloc(1, sizeof(MtModel));
+    if (!model) {
+        return NULL;
+    }
+
+    model->kind = MT_MODEL_MLP_MULTICLASS;
+    model->input_size = input_size;
+    model->hidden_size = hidden_size;
+    model->output_size = n_classes;
+    model->hidden = mt_linear_create(t, input_size, hidden_size, 1);
+    model->output = mt_linear_create(t, hidden_size, n_classes, 1);
+    model->seq = mt_sequential_create(mt_model_max_int(mt_model_max_int(input_size, hidden_size), n_classes));
+
+    if (!model->hidden || !model->output || !model->seq) {
+        mt_model_free(model);
+        return NULL;
+    }
+
+    mt_linear_init_xavier_uniform(t, model->hidden);
+    mt_linear_init_xavier_uniform(t, model->output);
+    if (!mt_sequential_add_linear(model->seq, model->hidden) ||
+        !mt_sequential_add_activation(model->seq, MT_ACT_TANH) ||
+        !mt_sequential_add_linear(model->seq, model->output)) {
+        mt_model_free(model);
+        return NULL;
+    }
+
+    return model;
+}
+
 void mt_model_free(MtModel *model) {
     if (!model) {
         return;
@@ -755,7 +814,19 @@ int mt_model_forward(AgTape *t,
         return 1;
     }
 
+    if (model->kind == MT_MODEL_LINEAR_MULTICLASS) {
+        if (!model->linear || output_size != model->output_size) {
+            return 0;
+        }
+        mt_linear_forward(t, model->linear, input, output);
+        return 1;
+    }
+
     if (model->kind == MT_MODEL_MLP_BINARY) {
+        return mt_sequential_forward(t, model->seq, input, input_size, output, output_size);
+    }
+
+    if (model->kind == MT_MODEL_MLP_MULTICLASS) {
         return mt_sequential_forward(t, model->seq, input, input_size, output, output_size);
     }
 
@@ -813,6 +884,89 @@ int mt_model_eval_binary(AgTape *t,
     }
 
     free(input);
+    result->loss_mean = total_loss / (float)dataset->n_samples;
+    result->accuracy = (float)correct / (float)dataset->n_samples;
+    result->correct = correct;
+    result->total = dataset->n_samples;
+    ag_rewind(t, graph_checkpoint);
+    return 1;
+}
+
+int mt_model_eval_multiclass(AgTape *t,
+                             const MtModel *model,
+                             int graph_checkpoint,
+                             const MtDataset *dataset,
+                             MtEvalResult *result,
+                             int *confusion_matrix) {
+    if (!t || !model || !dataset || !result || model->output_size <= 1) {
+        return 0;
+    }
+    if (dataset->n_samples <= 0 || dataset->n_features != model->input_size) {
+        return 0;
+    }
+
+    int n_classes = model->output_size;
+    if (confusion_matrix) {
+        for (int i = 0; i < n_classes * n_classes; i++) {
+            confusion_matrix[i] = 0;
+        }
+    }
+
+    AgVal *input = (AgVal *)malloc(sizeof(AgVal) * (size_t)model->input_size);
+    AgVal *logits = (AgVal *)malloc(sizeof(AgVal) * (size_t)n_classes);
+    AgVal *target = (AgVal *)malloc(sizeof(AgVal) * (size_t)n_classes);
+    if (!input || !logits || !target) {
+        free(input);
+        free(logits);
+        free(target);
+        return 0;
+    }
+
+    float total_loss = 0.0f;
+    int correct = 0;
+
+    for (int sample = 0; sample < dataset->n_samples; sample++) {
+        ag_rewind(t, graph_checkpoint);
+
+        int label = (int)mt_dataset_label(dataset, sample);
+        if (label < 0 || label >= n_classes) {
+            free(input);
+            free(logits);
+            free(target);
+            ag_rewind(t, graph_checkpoint);
+            return 0;
+        }
+
+        for (int feature = 0; feature < model->input_size; feature++) {
+            input[feature] = ag_leaf(t, mt_dataset_feature(dataset, sample, feature));
+        }
+        for (int c = 0; c < n_classes; c++) {
+            target[c] = ag_leaf(t, c == label ? 1.0f : 0.0f);
+        }
+
+        if (!mt_model_forward(t, model, input, model->input_size, logits, n_classes)) {
+            free(input);
+            free(logits);
+            free(target);
+            ag_rewind(t, graph_checkpoint);
+            return 0;
+        }
+
+        AgVal loss = mt_cross_entropy_from_logits(t, logits, target, n_classes);
+        int pred = mt_argmax(t, logits, n_classes);
+
+        total_loss += ag_data(t, loss);
+        if (pred == label) {
+            correct++;
+        }
+        if (confusion_matrix && pred >= 0 && pred < n_classes) {
+            confusion_matrix[label * n_classes + pred]++;
+        }
+    }
+
+    free(input);
+    free(logits);
+    free(target);
     result->loss_mean = total_loss / (float)dataset->n_samples;
     result->accuracy = (float)correct / (float)dataset->n_samples;
     result->correct = correct;
@@ -982,9 +1136,9 @@ int mt_model_save(const AgTape *t, const MtModel *model, const char *path) {
             model->output_size);
 
     int ok = 0;
-    if (model->kind == MT_MODEL_LINEAR_BINARY) {
+    if (model->kind == MT_MODEL_LINEAR_BINARY || model->kind == MT_MODEL_LINEAR_MULTICLASS) {
         ok = mt_model_save_linear_block(file, t, model->linear);
-    } else if (model->kind == MT_MODEL_MLP_BINARY) {
+    } else if (model->kind == MT_MODEL_MLP_BINARY || model->kind == MT_MODEL_MLP_MULTICLASS) {
         ok = mt_model_save_linear_block(file, t, model->hidden) &&
              mt_model_save_linear_block(file, t, model->output);
     }
@@ -1021,9 +1175,9 @@ int mt_model_load(AgTape *t, MtModel *model, const char *path) {
              hidden_size == model->hidden_size &&
              output_size == model->output_size;
 
-    if (ok && model->kind == MT_MODEL_LINEAR_BINARY) {
+    if (ok && (model->kind == MT_MODEL_LINEAR_BINARY || model->kind == MT_MODEL_LINEAR_MULTICLASS)) {
         ok = mt_model_load_linear_block(file, t, model->linear);
-    } else if (ok && model->kind == MT_MODEL_MLP_BINARY) {
+    } else if (ok && (model->kind == MT_MODEL_MLP_BINARY || model->kind == MT_MODEL_MLP_MULTICLASS)) {
         ok = mt_model_load_linear_block(file, t, model->hidden) &&
              mt_model_load_linear_block(file, t, model->output);
     } else {

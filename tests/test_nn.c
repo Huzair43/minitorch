@@ -362,6 +362,59 @@ static void test_model_mlp_forward(void) {
     ag_tape_free(t);
 }
 
+static void test_model_linear_multiclass_forward_eval(void) {
+    section("MtModel : Linear multi-classe");
+
+    float x[3] = {-2.0f, 0.0f, 2.0f};
+    float y[3] = {0.0f, 1.0f, 2.0f};
+
+    AgTape *t = ag_tape_create();
+    MtDataset *dataset = mt_dataset_create(x, y, 3, 1);
+    MtModel *model = mt_model_create_linear_multiclass(t, 1, 3);
+
+    mt_linear_set_weight(t, model->linear, 0, 0, -1.0f);
+    mt_linear_set_bias(t, model->linear, 0, 0.0f);
+    mt_linear_set_weight(t, model->linear, 1, 0, 0.0f);
+    mt_linear_set_bias(t, model->linear, 1, 1.0f);
+    mt_linear_set_weight(t, model->linear, 2, 0, 1.0f);
+    mt_linear_set_bias(t, model->linear, 2, 0.0f);
+    int graph_checkpoint = ag_checkpoint(t);
+
+    MtEvalResult eval;
+    int confusion[9];
+    int ok = mt_model_eval_multiclass(t, model, graph_checkpoint, dataset, &eval, confusion);
+
+    CHECK("model multi eval accepte", (float)ok, 1.0f);
+    CHECK("model multi exactitude", eval.accuracy, 1.0f);
+    CHECK("model multi confusion[0,0]", (float)confusion[0], 1.0f);
+    CHECK("model multi confusion[1,1]", (float)confusion[4], 1.0f);
+    CHECK("model multi confusion[2,2]", (float)confusion[8], 1.0f);
+
+    mt_model_free(model);
+    mt_dataset_free(dataset);
+    ag_tape_free(t);
+}
+
+static void test_model_mlp_multiclass_forward(void) {
+    section("MtModel : MLP multi-classe forward");
+
+    AgTape *t = ag_tape_create();
+    MtModel *model = mt_model_create_mlp_multiclass(t, 2, 4, 3);
+    AgVal input[2] = {
+        ag_leaf(t, 0.25f),
+        ag_leaf(t, -0.50f)
+    };
+    AgVal logits[3];
+
+    int ok = mt_model_forward(t, model, input, 2, logits, 3);
+
+    CHECK("mlp multi forward accepte", (float)ok, 1.0f);
+    CHECK("mlp multi sorties = 3", (float)model->output_size, 3.0f);
+
+    mt_model_free(model);
+    ag_tape_free(t);
+}
+
 static void test_model_save_load_linear(void) {
     section("MtModel : sauvegarde et chargement");
 
@@ -384,6 +437,31 @@ static void test_model_save_load_linear(void) {
     CHECK("model w0 restauré", ag_data(t, mt_linear_weight(model->linear, 0, 0)), 1.25f);
     CHECK("model w1 restauré", ag_data(t, mt_linear_weight(model->linear, 0, 1)), -0.75f);
     CHECK("model biais restauré", ag_data(t, mt_linear_bias(model->linear, 0)), 0.50f);
+
+    remove(path);
+    mt_model_free(model);
+    ag_tape_free(t);
+}
+
+static void test_model_save_load_multiclass(void) {
+    section("MtModel : sauvegarde multi-classe");
+
+    const char *path = "test_model_multiclass.mt";
+    AgTape *t = ag_tape_create();
+    MtModel *model = mt_model_create_linear_multiclass(t, 2, 3);
+
+    mt_linear_set_weight(t, model->linear, 2, 1, 2.50f);
+    mt_linear_set_bias(t, model->linear, 2, -1.25f);
+
+    int saved = mt_model_save(t, model, path);
+    mt_linear_set_weight(t, model->linear, 2, 1, 0.0f);
+    mt_linear_set_bias(t, model->linear, 2, 0.0f);
+    int loaded = mt_model_load(t, model, path);
+
+    CHECK("model multi sauvegarde accepte", (float)saved, 1.0f);
+    CHECK("model multi chargement accepte", (float)loaded, 1.0f);
+    CHECK("model multi poids restauré", ag_data(t, mt_linear_weight(model->linear, 2, 1)), 2.50f);
+    CHECK("model multi biais restauré", ag_data(t, mt_linear_bias(model->linear, 2)), -1.25f);
 
     remove(path);
     mt_model_free(model);
@@ -456,6 +534,38 @@ static void test_trainer_binary_api(void) {
     ag_tape_free(t);
 }
 
+static void test_trainer_multiclass_api(void) {
+    section("MtTrainer : entraînement multi-classe");
+
+    float x[6] = {-2.0f, -1.5f, 0.0f, 0.5f, 1.5f, 2.0f};
+    float y[6] = {0.0f, 0.0f, 1.0f, 1.0f, 2.0f, 2.0f};
+
+    AgTape *t = ag_tape_create();
+    MtDataset *dataset = mt_dataset_create(x, y, 6, 1);
+    MtModel *model = mt_model_create_linear_multiclass(t, 1, 3);
+    MtOptimizer *optim = mt_sgd_create(0.03f);
+    mt_optimizer_add_linear(optim, model->linear);
+
+    int graph_checkpoint = ag_checkpoint(t);
+    MtLoss loss = mt_loss_create(MT_LOSS_CROSS_ENTROPY_FROM_LOGITS);
+    MtTrainConfig config = mt_train_config_default();
+    config.epochs = 2;
+    config.batch_size = 3;
+    config.shuffle = 0;
+
+    MtTrainHistory history;
+    int ok = mt_trainer_train_multiclass(t, model, optim, &loss, graph_checkpoint, dataset, &config, &history);
+
+    CHECK("trainer multi accepte", (float)ok, 1.0f);
+    CHECK("trainer multi époques", (float)history.epochs_ran, 2.0f);
+    CHECK("trainer multi samples vus", (float)history.samples_seen, 12.0f);
+
+    mt_optimizer_free(optim);
+    mt_model_free(model);
+    mt_dataset_free(dataset);
+    ag_tape_free(t);
+}
+
 int main(void) {
     printf("test_nn : suite complete\n");
 
@@ -473,10 +583,14 @@ int main(void) {
     test_eval_multiclass_linear();
     test_model_linear_binary_eval();
     test_model_mlp_forward();
+    test_model_linear_multiclass_forward_eval();
+    test_model_mlp_multiclass_forward();
     test_model_save_load_linear();
+    test_model_save_load_multiclass();
     test_loss_abstraction();
     test_model_predict_api();
     test_trainer_binary_api();
+    test_trainer_multiclass_api();
 
     summary();
     return _failed == 0 ? 0 : 1;

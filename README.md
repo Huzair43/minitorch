@@ -85,8 +85,10 @@ Le module `nn` ajoute des briques de réseau:
 - évaluation simple de modèles `Linear`
 - abstraction `MtModel` pour manipuler un modèle complet
 - `mt_model_forward`, `mt_model_eval_binary`, `mt_model_save` et `mt_model_load`
+- modèles binaires et multi-classes avec `Linear` ou petit `MLP`
+- évaluation multi-classe avec matrice de confusion
 - abstraction `MtLoss` pour choisir une perte avec une API commune
-- `MtTrainer` pour lancer une boucle d'entraînement réutilisable
+- `MtTrainer` pour lancer une boucle d'entraînement binaire ou multi-classe
 
 Exemple simple:
 

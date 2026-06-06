@@ -140,3 +140,138 @@ int mt_trainer_train_binary(AgTape *t,
     ag_rewind(t, graph_checkpoint);
     return 1;
 }
+
+static float mt_trainer_train_multiclass_batch(AgTape *t,
+                                               MtModel *model,
+                                               MtOptimizer *optim,
+                                               const MtLoss *loss,
+                                               int graph_checkpoint,
+                                               const MtBatch *batch,
+                                               int count) {
+    if (!t || !model || !optim || !loss || !batch || count <= 0 || model->output_size <= 1) {
+        return 0.0f;
+    }
+
+    int n_classes = model->output_size;
+    AgVal *input = (AgVal *)malloc(sizeof(AgVal) * (size_t)model->input_size);
+    AgVal *logits = (AgVal *)malloc(sizeof(AgVal) * (size_t)n_classes);
+    if (!input || !logits) {
+        free(input);
+        free(logits);
+        return 0.0f;
+    }
+
+    ag_rewind(t, graph_checkpoint);
+    AgVal total_loss = ag_leaf(t, 0.0f);
+
+    for (int sample = 0; sample < count; sample++) {
+        int label = (int)mt_batch_label(batch, sample);
+        if (label < 0 || label >= n_classes) {
+            free(input);
+            free(logits);
+            return 0.0f;
+        }
+
+        for (int feature = 0; feature < model->input_size; feature++) {
+            input[feature] = ag_leaf(t, mt_batch_feature(batch, sample, feature));
+        }
+
+        if (!mt_model_forward(t, model, input, model->input_size, logits, n_classes)) {
+            free(input);
+            free(logits);
+            return 0.0f;
+        }
+
+        AgVal *target = (AgVal *)malloc(sizeof(AgVal) * (size_t)n_classes);
+        if (!target) {
+            free(input);
+            free(logits);
+            return 0.0f;
+        }
+        for (int c = 0; c < n_classes; c++) {
+            target[c] = ag_leaf(t, c == label ? 1.0f : 0.0f);
+        }
+
+        AgVal sample_loss = mt_loss_forward(t, loss, logits, target, n_classes);
+        total_loss = ag_add(t, total_loss, sample_loss);
+        free(target);
+    }
+
+    AgVal batch_loss = ag_mul(t, total_loss, ag_leaf(t, 1.0f / (float)count));
+    float loss_value = ag_data(t, batch_loss);
+
+    mt_optimizer_zero_grad(t, optim);
+    ag_backward(t, batch_loss);
+    mt_optimizer_step(t, optim);
+
+    free(input);
+    free(logits);
+    return loss_value;
+}
+
+int mt_trainer_train_multiclass(AgTape *t,
+                                MtModel *model,
+                                MtOptimizer *optim,
+                                const MtLoss *loss,
+                                int graph_checkpoint,
+                                MtDataset *train,
+                                const MtTrainConfig *config,
+                                MtTrainHistory *history) {
+    MtTrainConfig cfg;
+    if (!t || !model || !optim || !loss || !train || train->n_samples <= 0) {
+        return 0;
+    }
+    if (model->output_size <= 1 || train->n_features != model->input_size) {
+        return 0;
+    }
+    if (!mt_trainer_normalize_config(config, &cfg)) {
+        return 0;
+    }
+
+    MtBatch *batch = mt_batch_create(cfg.batch_size, train->n_features);
+    if (!batch) {
+        return 0;
+    }
+
+    MtTrainHistory local_history;
+    local_history.last_loss = 0.0f;
+    local_history.epochs_ran = 0;
+    local_history.batches_seen = 0;
+    local_history.samples_seen = 0;
+
+    for (int epoch = 1; epoch <= cfg.epochs; epoch++) {
+        float total_loss = 0.0f;
+        int seen = 0;
+        int n_batches = mt_dataset_num_batches(train, cfg.batch_size);
+
+        if (cfg.shuffle) {
+            mt_dataset_shuffle(train);
+        }
+
+        for (int batch_index = 0; batch_index < n_batches; batch_index++) {
+            int count = mt_dataset_get_batch(train, batch_index, cfg.batch_size, batch);
+            if (count <= 0) {
+                continue;
+            }
+
+            float batch_loss = mt_trainer_train_multiclass_batch(t, model, optim, loss, graph_checkpoint, batch, count);
+            total_loss += batch_loss * (float)count;
+            seen += count;
+            local_history.batches_seen++;
+            local_history.samples_seen += count;
+        }
+
+        if (seen > 0) {
+            local_history.last_loss = total_loss / (float)seen;
+        }
+        local_history.epochs_ran = epoch;
+    }
+
+    if (history) {
+        *history = local_history;
+    }
+
+    mt_batch_free(batch);
+    ag_rewind(t, graph_checkpoint);
+    return 1;
+}

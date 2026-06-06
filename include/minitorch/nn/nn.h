@@ -61,7 +61,9 @@ typedef struct {
 
 typedef enum {
     MT_MODEL_LINEAR_BINARY = 0,
-    MT_MODEL_MLP_BINARY
+    MT_MODEL_MLP_BINARY,
+    MT_MODEL_LINEAR_MULTICLASS,
+    MT_MODEL_MLP_MULTICLASS
 } MtModelKind;
 
 typedef struct {
@@ -136,6 +138,8 @@ int       mt_eval_multiclass_linear(AgTape *t,
 
 MtModel  *mt_model_create_linear_binary(AgTape *t, int input_size);
 MtModel  *mt_model_create_mlp_binary(AgTape *t, int input_size, int hidden_size);
+MtModel  *mt_model_create_linear_multiclass(AgTape *t, int input_size, int n_classes);
+MtModel  *mt_model_create_mlp_multiclass(AgTape *t, int input_size, int hidden_size, int n_classes);
 void      mt_model_free(MtModel *model);
 int       mt_model_forward(AgTape *t,
                            const MtModel *model,
@@ -149,6 +153,12 @@ int       mt_model_eval_binary(AgTape *t,
                                const MtDataset *dataset,
                                float threshold,
                                MtEvalResult *result);
+int       mt_model_eval_multiclass(AgTape *t,
+                                   const MtModel *model,
+                                   int graph_checkpoint,
+                                   const MtDataset *dataset,
+                                   MtEvalResult *result,
+                                   int *confusion_matrix);
 int       mt_model_predict(AgTape *t,
                            const MtModel *model,
                            int graph_checkpoint,
