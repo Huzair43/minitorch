@@ -512,6 +512,318 @@ static void print_eval_result(const char* name, const MtEvalResult* result) {
            result->total);
 }
 
+static int demo_max_int(int a, int b) {
+    return a > b ? a : b;
+}
+
+static void print_confusion_matrix(const int* matrix, int n_classes) {
+    if (!matrix || n_classes <= 0) {
+        return;
+    }
+
+    printf("\nMatrice de confusion (lignes=vrai, colonnes=prédit)\n");
+    for (int row = 0; row < n_classes; row++) {
+        for (int col = 0; col < n_classes; col++) {
+            printf("%4d", matrix[row * n_classes + col]);
+        }
+        printf("\n");
+    }
+}
+
+static void print_csv_info(const MtCsvInfo* info) {
+    if (!info) {
+        return;
+    }
+
+    printf("\nAnalyse du CSV\n");
+    printf("Lignes utilisables : %d\n", info->n_rows);
+    printf("Colonnes          : %d\n", info->n_columns);
+    printf("Variables         : %d\n", info->n_features);
+    printf("Label min/max     : %.0f / %.0f\n", info->label_min, info->label_max);
+    if (info->is_classification) {
+        printf("Tâche détectée    : classification %s (%d classes)\n",
+               info->is_binary ? "binaire" : "multi-classe",
+               info->n_classes);
+    } else {
+        printf("Tâche détectée    : non supportée pour l'instant\n");
+        printf("Les labels doivent être entiers et commencer à 0 : 0, 1, 2, ...\n");
+    }
+}
+
+static MtModel* create_csv_model(AgTape* tape, const MtCsvInfo* info, int model_choice, int hidden_size) {
+    if (!tape || !info || !info->is_classification) {
+        return NULL;
+    }
+
+    if (info->is_binary) {
+        if (model_choice == 1) {
+            return mt_model_create_linear_binary(tape, info->n_features);
+        }
+        return mt_model_create_mlp_binary(tape, info->n_features, hidden_size);
+    }
+
+    if (model_choice == 1) {
+        return mt_model_create_linear_multiclass(tape, info->n_features, info->n_classes);
+    }
+    return mt_model_create_mlp_multiclass(tape, info->n_features, hidden_size, info->n_classes);
+}
+
+static int add_csv_model_to_optimizer(MtOptimizer* optim, const MtModel* model) {
+    if (!optim || !model) {
+        return 0;
+    }
+
+    if (model->kind == MT_MODEL_LINEAR_BINARY || model->kind == MT_MODEL_LINEAR_MULTICLASS) {
+        return mt_optimizer_add_linear(optim, model->linear);
+    }
+    return mt_optimizer_add_sequential(optim, model->seq);
+}
+
+static void print_csv_predictions(AgTape* tape,
+                                  const MtModel* model,
+                                  int graph_checkpoint,
+                                  const MtDataset* dataset,
+                                  const MtCsvInfo* info) {
+    if (!tape || !model || !dataset || !info) {
+        return;
+    }
+
+    int limit = dataset->n_samples < 8 ? dataset->n_samples : 8;
+    float* features = (float*)malloc(sizeof(float) * (size_t)dataset->n_features);
+    float* output = (float*)malloc(sizeof(float) * (size_t)model->output_size);
+    if (!features || !output) {
+        free(features);
+        free(output);
+        return;
+    }
+
+    printf("\nQuelques prédictions sur test\n");
+    for (int sample = 0; sample < limit; sample++) {
+        for (int feature = 0; feature < dataset->n_features; feature++) {
+            features[feature] = mt_dataset_feature(dataset, sample, feature);
+        }
+
+        if (!mt_model_predict(tape, model, graph_checkpoint, features, output, model->output_size)) {
+            continue;
+        }
+
+        if (info->is_binary) {
+            int pred = output[0] >= 0.5f ? 1 : 0;
+            printf("exemple %d : y=%.0f, proba=%.4f, classe=%d\n",
+                   sample,
+                   mt_dataset_label(dataset, sample),
+                   output[0],
+                   pred);
+        } else {
+            int pred = mt_argmax_values(output, model->output_size);
+            printf("exemple %d : y=%.0f, classe prédite=%d, scores=[",
+                   sample,
+                   mt_dataset_label(dataset, sample),
+                   pred);
+            for (int c = 0; c < model->output_size; c++) {
+                if (c > 0) {
+                    printf(", ");
+                }
+                printf("%.3f", output[c]);
+            }
+            printf("]\n");
+        }
+    }
+
+    free(features);
+    free(output);
+}
+
+static void demo_csv_auto_pipeline(void) {
+    print_title("Charger un CSV, construire un modèle, analyser");
+
+    char csv_path[256];
+    int has_header = 1;
+    printf("Chemin du fichier CSV : ");
+    if (scanf(" %255[^\n]", csv_path) != 1) {
+        printf("Chemin invalide.\n");
+        return;
+    }
+    printf("Le CSV contient une ligne d'en-tête ? (1=oui, 0=non) : ");
+    if (scanf("%d", &has_header) != 1) {
+        printf("Réponse invalide.\n");
+        return;
+    }
+    has_header = has_header ? 1 : 0;
+
+    MtCsvInfo info;
+    if (!mt_dataset_analyze_csv(csv_path, has_header, &info)) {
+        printf("Analyse du CSV échouée.\n");
+        printf("Format attendu : colonnes numériques, features d'abord, label en dernière colonne.\n");
+        return;
+    }
+
+    print_csv_info(&info);
+    if (!info.is_classification) {
+        return;
+    }
+
+    MtDataset* dataset = mt_dataset_load_csv_auto(csv_path, has_header, &info);
+    if (!dataset) {
+        printf("Chargement du dataset échoué.\n");
+        return;
+    }
+
+    float train_pct = 70.0f;
+    float val_pct = 15.0f;
+    printf("\nPourcentage train : ");
+    scanf("%f", &train_pct);
+    printf("Pourcentage validation : ");
+    scanf("%f", &val_pct);
+    if (train_pct <= 0.0f || val_pct < 0.0f || train_pct + val_pct >= 100.0f) {
+        printf("Pourcentages invalides. Valeurs utilisées : train=70, validation=15, test=15.\n");
+        train_pct = 70.0f;
+        val_pct = 15.0f;
+    }
+
+    int model_choice = 1;
+    int hidden_size = demo_max_int(info.n_features * 2, info.n_classes + 2);
+    printf("\nChoisis un modèle\n");
+    if (info.is_binary) {
+        printf("1. Linear(%d, 1) + Sigmoid\n", info.n_features);
+        printf("2. MLP : Linear(%d, hidden) + Tanh + Linear(hidden, 1) + Sigmoid\n", info.n_features);
+    } else {
+        printf("1. Linear(%d, %d)\n", info.n_features, info.n_classes);
+        printf("2. MLP : Linear(%d, hidden) + Tanh + Linear(hidden, %d)\n", info.n_features, info.n_classes);
+    }
+    printf("Choix : ");
+    scanf("%d", &model_choice);
+    if (model_choice != 1 && model_choice != 2) {
+        printf("Choix invalide. Modèle 1 utilisé.\n");
+        model_choice = 1;
+    }
+    if (model_choice == 2) {
+        printf("Taille de la couche cachée [%d] : ", hidden_size);
+        scanf("%d", &hidden_size);
+        if (hidden_size <= 0) {
+            hidden_size = demo_max_int(info.n_features * 2, info.n_classes + 2);
+        }
+    }
+
+    int epochs = info.is_binary ? 120 : 160;
+    int batch_size = 4;
+    float lr = info.is_binary ? 0.05f : 0.03f;
+    printf("\nÉpoques : ");
+    scanf("%d", &epochs);
+    if (epochs < 1) epochs = info.is_binary ? 120 : 160;
+    printf("Taille de batch : ");
+    scanf("%d", &batch_size);
+    if (batch_size < 1) batch_size = 4;
+    printf("Taux d'apprentissage : ");
+    scanf("%f", &lr);
+    if (lr <= 0.0f) lr = info.is_binary ? 0.05f : 0.03f;
+
+    srand(11);
+    mt_dataset_shuffle(dataset);
+
+    MtDataset* train = NULL;
+    MtDataset* val = NULL;
+    MtDataset* test = NULL;
+    if (!mt_dataset_split(dataset, train_pct / 100.0f, val_pct / 100.0f, &train, &val, &test)) {
+        printf("Split du dataset échoué. Il faut au moins quelques lignes valides.\n");
+        mt_dataset_free(dataset);
+        return;
+    }
+
+    printf("Split : train=%d, validation=%d, test=%d\n",
+           train->n_samples,
+           val ? val->n_samples : 0,
+           test->n_samples);
+
+    AgTape* tape = ag_tape_create();
+    MtModel* model = create_csv_model(tape, &info, model_choice, hidden_size);
+    MtOptimizer* optim = mt_adam_create(lr, 0.9f, 0.999f, 1e-8f);
+    if (!tape || !model || !optim || !add_csv_model_to_optimizer(optim, model)) {
+        printf("Création du modèle ou de l'optimiseur échouée.\n");
+        mt_optimizer_free(optim);
+        mt_model_free(model);
+        ag_tape_free(tape);
+        mt_dataset_free(train);
+        mt_dataset_free(val);
+        mt_dataset_free(test);
+        mt_dataset_free(dataset);
+        return;
+    }
+
+    int graph_checkpoint = ag_checkpoint(tape);
+    MtLoss loss = mt_loss_create(info.is_binary ? MT_LOSS_BCE : MT_LOSS_CROSS_ENTROPY_FROM_LOGITS);
+    MtTrainConfig config = mt_train_config_default();
+    config.epochs = epochs;
+    config.batch_size = batch_size;
+    config.shuffle = 1;
+
+    MtTrainHistory history;
+    int train_ok = info.is_binary
+        ? mt_trainer_train_binary(tape, model, optim, &loss, graph_checkpoint, train, &config, &history)
+        : mt_trainer_train_multiclass(tape, model, optim, &loss, graph_checkpoint, train, &config, &history);
+    if (!train_ok) {
+        printf("Entraînement échoué.\n");
+        mt_optimizer_free(optim);
+        mt_model_free(model);
+        ag_tape_free(tape);
+        mt_dataset_free(train);
+        mt_dataset_free(val);
+        mt_dataset_free(test);
+        mt_dataset_free(dataset);
+        return;
+    }
+
+    printf("\nEntraînement terminé : %d époques, %d batches, perte finale %.6f\n",
+           history.epochs_ran,
+           history.batches_seen,
+           history.last_loss);
+
+    MtEvalResult train_eval;
+    MtEvalResult val_eval;
+    MtEvalResult test_eval;
+    printf("\nÉvaluation\n");
+    if (info.is_binary) {
+        if (mt_model_eval_binary(tape, model, graph_checkpoint, train, 0.5f, &train_eval)) {
+            print_eval_result("Train", &train_eval);
+        }
+        if (val && mt_model_eval_binary(tape, model, graph_checkpoint, val, 0.5f, &val_eval)) {
+            print_eval_result("Validation", &val_eval);
+        }
+        if (mt_model_eval_binary(tape, model, graph_checkpoint, test, 0.5f, &test_eval)) {
+            print_eval_result("Test", &test_eval);
+        }
+    } else {
+        int* confusion = (int*)malloc(sizeof(int) * (size_t)(info.n_classes * info.n_classes));
+        if (mt_model_eval_multiclass(tape, model, graph_checkpoint, train, &train_eval, NULL)) {
+            print_eval_result("Train", &train_eval);
+        }
+        if (val && mt_model_eval_multiclass(tape, model, graph_checkpoint, val, &val_eval, NULL)) {
+            print_eval_result("Validation", &val_eval);
+        }
+        if (confusion && mt_model_eval_multiclass(tape, model, graph_checkpoint, test, &test_eval, confusion)) {
+            print_eval_result("Test", &test_eval);
+            print_confusion_matrix(confusion, info.n_classes);
+        }
+        free(confusion);
+    }
+
+    print_csv_predictions(tape, model, graph_checkpoint, test, &info);
+
+    if (mt_model_save(tape, model, "csv_auto_model.mt")) {
+        printf("\nModèle sauvegardé : csv_auto_model.mt\n");
+    } else {
+        printf("\nSauvegarde du modèle échouée.\n");
+    }
+
+    mt_optimizer_free(optim);
+    mt_model_free(model);
+    ag_tape_free(tape);
+    mt_dataset_free(train);
+    mt_dataset_free(val);
+    mt_dataset_free(test);
+    mt_dataset_free(dataset);
+}
+
 static void demo_fake_dataset_pipeline(void) {
     print_title("Charger un dataset fictif, splitter, choisir un modèle");
 
@@ -714,6 +1026,7 @@ static void print_menu(void) {
     printf("8. Sauvegarde modèle\n");
     printf("9. Softmax et CrossEntropy\n");
     printf("10. Pipeline dataset fictif\n");
+    printf("11. Pipeline CSV personnalisé\n");
     printf("0. Quitter\n");
     printf("Choix : ");
 }
@@ -740,6 +1053,7 @@ int main(void) {
             case 8: demo_serialization_module(); break;
             case 9: demo_multiclass_module(); break;
             case 10: demo_fake_dataset_pipeline(); break;
+            case 11: demo_csv_auto_pipeline(); break;
             case 0:
                 printf("Au revoir\n");
                 return 0;

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minitorch-c"
+version = "0.1.0"
+description = "Mini framework de deep learning en C avec API Python ctypes"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "MiniTorch contributors" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.scripts]
+minitorch-info = "minitorch.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "python" }
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["minitorch*"]
+
+[tool.setuptools.package-data]
+minitorch = ["*.dll", "*.so", "*.dylib"]

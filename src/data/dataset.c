@@ -5,6 +5,57 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef MT_CSV_MAX_CLASSES
+#  define MT_CSV_MAX_CLASSES 64
+#endif
+
+static float mt_absf_local(float value) {
+    return value < 0.0f ? -value : value;
+}
+
+static int mt_is_blank_line(const char *line) {
+    if (!line) {
+        return 1;
+    }
+    while (*line) {
+        if (!isspace((unsigned char)*line)) {
+            return 0;
+        }
+        line++;
+    }
+    return 1;
+}
+
+static int mt_count_csv_columns(const char *line) {
+    if (!line || mt_is_blank_line(line)) {
+        return 0;
+    }
+
+    int columns = 1;
+    const char *cursor = line;
+    while (*cursor && *cursor != '\n' && *cursor != '\r') {
+        if (*cursor == ',' || *cursor == ';') {
+            columns++;
+        }
+        cursor++;
+    }
+    return columns;
+}
+
+static int mt_float_to_class(float value, int *class_id) {
+    if (!class_id || value < 0.0f) {
+        return 0;
+    }
+
+    int rounded = (int)(value + 0.5f);
+    if (mt_absf_local(value - (float)rounded) > 1e-4f) {
+        return 0;
+    }
+
+    *class_id = rounded;
+    return 1;
+}
+
 static int mt_parse_csv_line(const char *line, int n_features, float *features, float *label) {
     if (!line || n_features <= 0 || !features || !label) {
         return 0;
@@ -87,6 +138,102 @@ MtDataset *mt_dataset_create(const float *x, const float *y, int n_samples, int 
     return dataset;
 }
 
+int mt_dataset_analyze_csv(const char *path, int has_header, MtCsvInfo *info) {
+    if (!path || !info) {
+        return 0;
+    }
+
+    FILE *file = fopen(path, "r");
+    if (!file) {
+        return 0;
+    }
+
+    memset(info, 0, sizeof(MtCsvInfo));
+    info->has_header = has_header ? 1 : 0;
+
+    char line[1024];
+    if (has_header) {
+        fgets(line, sizeof(line), file);
+    }
+
+    int class_seen[MT_CSV_MAX_CLASSES];
+    for (int i = 0; i < MT_CSV_MAX_CLASSES; i++) {
+        class_seen[i] = 0;
+    }
+
+    int labels_are_classes = 1;
+    int max_class = -1;
+    int unique_classes = 0;
+    int first_label = 1;
+
+    while (fgets(line, sizeof(line), file)) {
+        if (mt_is_blank_line(line)) {
+            continue;
+        }
+
+        int columns = mt_count_csv_columns(line);
+        if (columns < 2) {
+            continue;
+        }
+        if (info->n_columns == 0) {
+            info->n_columns = columns;
+            info->n_features = columns - 1;
+        }
+        if (columns != info->n_columns) {
+            labels_are_classes = 0;
+            continue;
+        }
+
+        float *features = (float *)malloc(sizeof(float) * (size_t)info->n_features);
+        float label = 0.0f;
+        int ok = features && mt_parse_csv_line(line, info->n_features, features, &label);
+        free(features);
+        if (!ok) {
+            labels_are_classes = 0;
+            continue;
+        }
+
+        if (first_label) {
+            info->label_min = label;
+            info->label_max = label;
+            first_label = 0;
+        } else {
+            if (label < info->label_min) {
+                info->label_min = label;
+            }
+            if (label > info->label_max) {
+                info->label_max = label;
+            }
+        }
+
+        int class_id = -1;
+        if (!mt_float_to_class(label, &class_id) || class_id >= MT_CSV_MAX_CLASSES) {
+            labels_are_classes = 0;
+        } else if (!class_seen[class_id]) {
+            class_seen[class_id] = 1;
+            unique_classes++;
+            if (class_id > max_class) {
+                max_class = class_id;
+            }
+        }
+
+        info->n_rows++;
+    }
+
+    fclose(file);
+
+    if (info->n_rows <= 0 || info->n_features <= 0) {
+        memset(info, 0, sizeof(MtCsvInfo));
+        return 0;
+    }
+
+    int dense_classes = labels_are_classes && max_class >= 1 && unique_classes == max_class + 1;
+    info->n_classes = dense_classes ? unique_classes : 0;
+    info->is_classification = dense_classes ? 1 : 0;
+    info->is_binary = dense_classes && unique_classes == 2 ? 1 : 0;
+    return 1;
+}
+
 MtDataset *mt_dataset_load_csv(const char *path, int n_features, int has_header) {
     if (!path || n_features <= 0) {
         return NULL;
@@ -152,6 +299,17 @@ MtDataset *mt_dataset_load_csv(const char *path, int n_features, int has_header)
     free(x);
     free(y);
     return dataset;
+}
+
+MtDataset *mt_dataset_load_csv_auto(const char *path, int has_header, MtCsvInfo *info) {
+    MtCsvInfo local_info;
+    MtCsvInfo *target_info = info ? info : &local_info;
+
+    if (!mt_dataset_analyze_csv(path, has_header, target_info)) {
+        return NULL;
+    }
+
+    return mt_dataset_load_csv(path, target_info->n_features, has_header);
 }
 
 void mt_dataset_free(MtDataset *dataset) {

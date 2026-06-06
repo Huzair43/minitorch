@@ -166,6 +166,20 @@ int mt_optimizer_add_sequential(MtOptimizer *opt, const MtSequential *seq) {
     return 1;
 }
 
+int mt_optimizer_add_model(MtOptimizer *opt, const MtModel *model) {
+    if (!opt || !model) {
+        return 0;
+    }
+
+    if (model->kind == MT_MODEL_LINEAR_BINARY || model->kind == MT_MODEL_LINEAR_MULTICLASS) {
+        return mt_optimizer_add_linear(opt, model->linear);
+    }
+    if (model->kind == MT_MODEL_MLP_BINARY || model->kind == MT_MODEL_MLP_MULTICLASS) {
+        return mt_optimizer_add_sequential(opt, model->seq);
+    }
+    return 0;
+}
+
 void mt_optimizer_zero_grad(AgTape *t, MtOptimizer *opt) {
     (void)opt;
     ag_zero_grad(t);

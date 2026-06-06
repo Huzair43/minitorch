@@ -162,6 +162,46 @@ static void test_dataset_load_csv(void) {
     remove(path);
 }
 
+static void test_dataset_analyze_csv_auto(void) {
+    section("Dataset : analyse CSV automatique");
+
+    const char *path = "test_dataset_analyze.csv";
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        CHECK("creation fichier analyse CSV", 0.0f, 1.0f);
+        return;
+    }
+
+    fprintf(file, "x1,x2,label\n");
+    fprintf(file, "-2.0,-1.0,0\n");
+    fprintf(file, "-1.0,-0.5,0\n");
+    fprintf(file, "0.5,0.2,1\n");
+    fprintf(file, "1.0,0.8,1\n");
+    fprintf(file, "2.0,1.5,2\n");
+    fprintf(file, "2.5,2.0,2\n");
+    fclose(file);
+
+    MtCsvInfo info;
+    int ok = mt_dataset_analyze_csv(path, 1, &info);
+    MtDataset *dataset = mt_dataset_load_csv_auto(path, 1, &info);
+
+    CHECK("analyse csv accepte", (float)ok, 1.0f);
+    CHECK("analyse csv lignes", (float)info.n_rows, 6.0f);
+    CHECK("analyse csv colonnes", (float)info.n_columns, 3.0f);
+    CHECK("analyse csv features", (float)info.n_features, 2.0f);
+    CHECK("analyse csv classes", (float)info.n_classes, 3.0f);
+    CHECK("analyse csv classification", (float)info.is_classification, 1.0f);
+    CHECK("analyse csv non binaire", (float)info.is_binary, 0.0f);
+    CHECK("auto csv charge", dataset != NULL ? 1.0f : 0.0f, 1.0f);
+    if (dataset) {
+        CHECK("auto csv n_samples", (float)dataset->n_samples, 6.0f);
+        CHECK("auto csv y[5]", mt_dataset_label(dataset, 5), 2.0f);
+    }
+
+    mt_dataset_free(dataset);
+    remove(path);
+}
+
 int main(void) {
     printf("test_data : suite complete\n");
 
@@ -170,6 +210,7 @@ int main(void) {
     test_invalid_inputs();
     test_dataset_split();
     test_dataset_load_csv();
+    test_dataset_analyze_csv_auto();
 
     summary();
     return _failed == 0 ? 0 : 1;

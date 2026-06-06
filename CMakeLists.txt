@@ -11,6 +11,19 @@ target_include_directories(minitorch PUBLIC
     ${CMAKE_SOURCE_DIR}/include
 )
 
+# ── Bibliothèque partagée pour Python ctypes ───────────
+add_library(minitorch_c SHARED ${SOURCES})
+target_include_directories(minitorch_c PUBLIC
+    ${CMAKE_SOURCE_DIR}/include
+)
+set_target_properties(minitorch_c PROPERTIES
+    OUTPUT_NAME minitorch_c
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+if(UNIX)
+    target_link_libraries(minitorch_c m)
+endif()
+
 # ── Executables examples ───────────────────────────────
 add_executable(example examples/main.c)
 target_include_directories(example PRIVATE ${CMAKE_SOURCE_DIR}/include)

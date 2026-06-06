@@ -33,6 +33,17 @@ compile_commands.json
 *.log
 *.tmp
 *.swp
+*.mt
+
+# =========================
+# PYTHON
+# =========================
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 
 # =========================
 # IDE / EDITORS

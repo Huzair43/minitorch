@@ -16,8 +16,22 @@ typedef struct {
     float *y;
 } MtBatch;
 
+typedef struct {
+    int n_rows;
+    int n_columns;
+    int n_features;
+    int has_header;
+    int n_classes;
+    int is_classification;
+    int is_binary;
+    float label_min;
+    float label_max;
+} MtCsvInfo;
+
 MtDataset *mt_dataset_create(const float *x, const float *y, int n_samples, int n_features);
+int        mt_dataset_analyze_csv(const char *path, int has_header, MtCsvInfo *info);
 MtDataset *mt_dataset_load_csv(const char *path, int n_features, int has_header);
+MtDataset *mt_dataset_load_csv_auto(const char *path, int has_header, MtCsvInfo *info);
 void       mt_dataset_free(MtDataset *dataset);
 void       mt_dataset_shuffle(MtDataset *dataset);
 int        mt_dataset_split(const MtDataset *dataset,

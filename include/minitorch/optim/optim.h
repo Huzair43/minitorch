@@ -35,6 +35,7 @@ int          mt_optimizer_add_param(MtOptimizer *opt, AgVal param);
 int          mt_optimizer_add_params(MtOptimizer *opt, const AgVal *params, int n);
 int          mt_optimizer_add_linear(MtOptimizer *opt, const MtLinear *layer);
 int          mt_optimizer_add_sequential(MtOptimizer *opt, const MtSequential *seq);
+int          mt_optimizer_add_model(MtOptimizer *opt, const MtModel *model);
 
 void         mt_optimizer_zero_grad(AgTape *t, MtOptimizer *opt);
 void         mt_optimizer_step(AgTape *t, MtOptimizer *opt);

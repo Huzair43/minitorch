@@ -11,6 +11,7 @@ Le but du projet est pédagogique. Il permet de comprendre les briques principal
 - datasets et mini-batches
 - sauvegarde et chargement des poids
 - exemples d'entraînement
+- première API Python au-dessus du moteur C
 
 Le projet n'est pas encore une librairie de production. C'est une base d'apprentissage qui grandit étape par étape.
 
@@ -134,6 +135,7 @@ Le module `data` permet de travailler avec:
 - shuffle
 - split train, validation et test
 - chargement CSV simple
+- analyse CSV automatique pour détecter les colonnes, les features et les classes
 
 Exemple:
 
@@ -161,8 +163,17 @@ Chargement CSV:
 MtDataset* dataset = mt_dataset_load_csv("data.csv", 2, 1);
 ```
 
+Analyse et chargement automatique:
+
+```c
+MtCsvInfo info;
+mt_dataset_analyze_csv("data.csv", 1, &info);
+MtDataset* dataset = mt_dataset_load_csv_auto("data.csv", 1, &info);
+```
+
 Dans ce format, les colonnes de features viennent d'abord. La dernière colonne est le label.
 Le dernier argument indique si le fichier contient une ligne d'en-tête.
+Pour la classification, les labels doivent être des entiers qui commencent à 0: `0`, `1`, `2`, etc.
 
 ### Sauvegarde des poids
 
@@ -197,6 +208,78 @@ Lancer tous les tests:
 ctest --output-on-failure
 ```
 
+## API Python
+
+MiniTorch expose une première API Python avec `ctypes`.
+Le code Python se trouve dans:
+
+```text
+python/minitorch/
+```
+
+L'objectif est d'utiliser le moteur C avec une syntaxe plus proche de PyTorch:
+
+```python
+import minitorch as mt
+
+data = mt.Dataset.from_csv("data.csv", has_header=True)
+
+model = mt.MLP(
+    input_size=data.n_features,
+    hidden_size=8,
+    output_size=1 if data.is_binary else data.n_classes
+)
+
+trainer = mt.Trainer(model, optimizer="adam", lr=0.03, loss="auto")
+result = trainer.fit(data, epochs=120, batch_size=4)
+
+print(result.test)
+model.save("model.mt")
+```
+
+Installation en mode développement:
+
+```bash
+python -m pip install -e .
+```
+
+Le nom installé par `pip` est `minitorch-c`, mais le module Python à importer est `minitorch`.
+
+Tu peux vérifier que le package Python est visible avec:
+
+```bash
+python -c "import minitorch as mt; print(mt.__version__); print(mt.show_config())"
+python -m minitorch
+minitorch-info
+```
+
+Ensuite, il faut compiler la librairie partagée C:
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+Si Python ne trouve pas la librairie C, indique son chemin:
+
+```bash
+export MINITORCH_LIB=$PWD/build/libminitorch_c.so
+```
+
+Sous PowerShell Windows:
+
+```powershell
+$env:MINITORCH_LIB="$PWD\build\Debug\minitorch_c.dll"
+```
+
+Sous Windows, le fichier peut aussi être dans `build\Release`. Sous macOS, il peut être `libminitorch_c.dylib`.
+
+Exemple complet:
+
+```bash
+python python/examples/train_csv.py examples/datasets/dataset_fictif_binaire.csv
+```
+
 ## Programmes disponibles
 
 Après compilation, les exécutables principaux sont:
@@ -216,6 +299,14 @@ test_serialization
 test_multiclass
 ```
 
+La compilation produit aussi une librairie partagée pour Python:
+
+```text
+libminitorch_c.so
+minitorch_c.dll
+libminitorch_c.dylib
+```
+
 ### `example`
 
 Menu interactif qui montre les bases du projet:
@@ -230,6 +321,7 @@ Menu interactif qui montre les bases du projet:
 - sauvegarde de modèle
 - softmax et cross-entropy
 - pipeline complet avec dataset fictif CSV
+- pipeline CSV personnalisé
 
 Lancement:
 
@@ -243,6 +335,12 @@ Après entraînement, l'option `10` sauvegarde le modèle dans:
 
 ```text
 dataset_pipeline_model.mt
+```
+
+Dans le menu, l'option `11` permet de donner le chemin d'un fichier CSV. MiniTorch analyse le fichier, détecte le nombre de features et le nombre de classes, construit un modèle adapté, entraîne, évalue, affiche quelques prédictions et sauvegarde le modèle dans:
+
+```text
+csv_auto_model.mt
 ```
 
 ### `demo_train`
@@ -357,6 +455,11 @@ include/minitorch/
   optim/
   data/
   serialization/
+  train/
+
+python/
+  minitorch/
+  examples/
 
 src/
   core/
@@ -364,6 +467,7 @@ src/
   optim/
   data/
   serialization/
+  train/
 
 examples/
   main.c
