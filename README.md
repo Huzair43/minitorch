@@ -83,6 +83,10 @@ Le module `nn` ajoute des briques de réseau:
 - initialisations `zeros`, `Xavier uniform` et `He uniform`
 - métriques simples: `argmax`, moyenne, exactitude et matrice de confusion
 - évaluation simple de modèles `Linear`
+- abstraction `MtModel` pour manipuler un modèle complet
+- `mt_model_forward`, `mt_model_eval_binary`, `mt_model_save` et `mt_model_load`
+- abstraction `MtLoss` pour choisir une perte avec une API commune
+- `MtTrainer` pour lancer une boucle d'entraînement réutilisable
 
 Exemple simple:
 
@@ -231,7 +235,13 @@ Lancement:
 ./example
 ```
 
-Dans le menu, l'option `10` charge `examples/datasets/dataset_fictif_binaire.csv`. Tu peux choisir les pourcentages train, validation et test, puis choisir entre une régression logistique et un petit MLP.
+Dans le menu, l'option `10` charge `examples/datasets/dataset_fictif_binaire.csv`. Tu peux choisir les pourcentages train, validation et test, puis choisir entre une régression logistique et un petit MLP. Les deux modèles passent par `MtModel`, donc le forward, les prédictions et l'évaluation utilisent la même API. L'entraînement passe par `MtTrainer` et la perte passe par `MtLoss`.
+
+Après entraînement, l'option `10` sauvegarde le modèle dans:
+
+```text
+dataset_pipeline_model.mt
+```
 
 ### `demo_train`
 

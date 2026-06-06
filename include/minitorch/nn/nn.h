@@ -48,6 +48,33 @@ typedef struct {
     int total;
 } MtEvalResult;
 
+typedef enum {
+    MT_LOSS_MSE = 0,
+    MT_LOSS_BCE,
+    MT_LOSS_CROSS_ENTROPY,
+    MT_LOSS_CROSS_ENTROPY_FROM_LOGITS
+} MtLossKind;
+
+typedef struct {
+    MtLossKind kind;
+} MtLoss;
+
+typedef enum {
+    MT_MODEL_LINEAR_BINARY = 0,
+    MT_MODEL_MLP_BINARY
+} MtModelKind;
+
+typedef struct {
+    MtModelKind kind;
+    int input_size;
+    int hidden_size;
+    int output_size;
+    MtLinear *linear;
+    MtLinear *hidden;
+    MtLinear *output;
+    MtSequential *seq;
+} MtModel;
+
 MtLinear *mt_linear_create(AgTape *t, int in_features, int out_features, int use_bias);
 void      mt_linear_free(MtLinear *layer);
 void      mt_linear_init_uniform(AgTape *t, MtLinear *layer, float lo, float hi);
@@ -83,6 +110,8 @@ AgVal     mt_mse_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
 AgVal     mt_bce_loss(AgTape *t, const AgVal *pred, const AgVal *target, int n);
 AgVal     mt_cross_entropy_loss(AgTape *t, const AgVal *probs, const AgVal *target, int n);
 AgVal     mt_cross_entropy_from_logits(AgTape *t, const AgVal *logits, const AgVal *target, int n);
+MtLoss    mt_loss_create(MtLossKind kind);
+AgVal     mt_loss_forward(AgTape *t, const MtLoss *loss, const AgVal *pred, const AgVal *target, int n);
 
 int       mt_argmax_values(const float *values, int n);
 int       mt_argmax(AgTape *t, const AgVal *values, int n);
@@ -104,5 +133,35 @@ int       mt_eval_multiclass_linear(AgTape *t,
                                     int n_classes,
                                     MtEvalResult *result,
                                     int *confusion_matrix);
+
+MtModel  *mt_model_create_linear_binary(AgTape *t, int input_size);
+MtModel  *mt_model_create_mlp_binary(AgTape *t, int input_size, int hidden_size);
+void      mt_model_free(MtModel *model);
+int       mt_model_forward(AgTape *t,
+                           const MtModel *model,
+                           const AgVal *input,
+                           int input_size,
+                           AgVal *output,
+                           int output_size);
+int       mt_model_eval_binary(AgTape *t,
+                               const MtModel *model,
+                               int graph_checkpoint,
+                               const MtDataset *dataset,
+                               float threshold,
+                               MtEvalResult *result);
+int       mt_model_predict(AgTape *t,
+                           const MtModel *model,
+                           int graph_checkpoint,
+                           const float *features,
+                           float *output,
+                           int output_size);
+int       mt_model_predict_dataset(AgTape *t,
+                                   const MtModel *model,
+                                   int graph_checkpoint,
+                                   const MtDataset *dataset,
+                                   float *outputs,
+                                   int output_size);
+int       mt_model_save(const AgTape *t, const MtModel *model, const char *path);
+int       mt_model_load(AgTape *t, MtModel *model, const char *path);
 
 #endif /* MINITORCH_NN_H */

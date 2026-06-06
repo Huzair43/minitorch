@@ -14,6 +14,7 @@
 #include "minitorch/nn/nn.h"
 #include "minitorch/optim/optim.h"
 #include "minitorch/serialization/serialization.h"
+#include "minitorch/train/trainer.h"
 
 static void configure_console(void) {
 #ifdef _WIN32
@@ -406,25 +407,14 @@ static int find_demo_dataset_path(char* out, int out_size) {
 }
 
 static int demo_forward_binary(AgTape* tape,
-                               int model_choice,
-                               const MtLinear* linear,
-                               const MtSequential* mlp,
+                               const MtModel* model,
                                const AgVal* input,
                                AgVal* prob) {
-    if (model_choice == 1) {
-        AgVal logits[1];
-        mt_linear_forward(tape, linear, input, logits);
-        mt_sigmoid(tape, logits, 1, prob);
-        return 1;
-    }
-
-    return mt_sequential_forward(tape, mlp, input, 2, prob, 1);
+    return mt_model_forward(tape, model, input, model->input_size, prob, 1);
 }
 
 static float demo_dataset_train_batch(AgTape* tape,
-                                      int model_choice,
-                                      MtLinear* linear,
-                                      MtSequential* mlp,
+                                      MtModel* model,
                                       MtOptimizer* optim,
                                       int graph_checkpoint,
                                       const MtBatch* batch,
@@ -438,7 +428,7 @@ static float demo_dataset_train_batch(AgTape* tape,
     for (int i = 0; i < count; i++) {
         input[0] = ag_leaf(tape, mt_batch_feature(batch, i, 0));
         input[1] = ag_leaf(tape, mt_batch_feature(batch, i, 1));
-        if (!demo_forward_binary(tape, model_choice, linear, mlp, input, &pred[i])) {
+        if (!demo_forward_binary(tape, model, input, &pred[i])) {
             pred[i] = ag_leaf(tape, 0.5f);
         }
         target[i] = ag_leaf(tape, mt_batch_label(batch, i));
@@ -454,9 +444,7 @@ static float demo_dataset_train_batch(AgTape* tape,
 }
 
 static void demo_dataset_train(AgTape* tape,
-                               int model_choice,
-                               MtLinear* linear,
-                               MtSequential* mlp,
+                               MtModel* model,
                                MtOptimizer* optim,
                                int graph_checkpoint,
                                MtDataset* train,
@@ -485,7 +473,7 @@ static void demo_dataset_train(AgTape* tape,
             int count = mt_dataset_get_batch(train, b, batch_size, batch);
             if (count <= 0) continue;
 
-            float loss = demo_dataset_train_batch(tape, model_choice, linear, mlp, optim, graph_checkpoint, batch, count);
+            float loss = demo_dataset_train_batch(tape, model, optim, graph_checkpoint, batch, count);
             total_loss += loss * (float)count;
             seen += count;
         }
@@ -499,73 +487,20 @@ static void demo_dataset_train(AgTape* tape,
 }
 
 static float demo_dataset_predict_prob(AgTape* tape,
-                                       int model_choice,
-                                       const MtLinear* linear,
-                                       const MtSequential* mlp,
+                                       const MtModel* model,
                                        int graph_checkpoint,
                                        const MtDataset* dataset,
                                        int index) {
-    ag_rewind(tape, graph_checkpoint);
-
-    AgVal input[2] = {
-        ag_leaf(tape, mt_dataset_feature(dataset, index, 0)),
-        ag_leaf(tape, mt_dataset_feature(dataset, index, 1))
+    float features[2] = {
+        mt_dataset_feature(dataset, index, 0),
+        mt_dataset_feature(dataset, index, 1)
     };
-    AgVal prob[1];
+    float output[1];
 
-    if (!demo_forward_binary(tape, model_choice, linear, mlp, input, prob)) {
+    if (!mt_model_predict(tape, model, graph_checkpoint, features, output, 1)) {
         return 0.5f;
     }
-    return ag_data(tape, prob[0]);
-}
-
-static int demo_dataset_eval(AgTape* tape,
-                             int model_choice,
-                             const MtLinear* linear,
-                             const MtSequential* mlp,
-                             int graph_checkpoint,
-                             const MtDataset* dataset,
-                             MtEvalResult* result) {
-    if (!tape || !dataset || !result || dataset->n_samples <= 0) {
-        return 0;
-    }
-
-    float total_loss = 0.0f;
-    int correct = 0;
-
-    for (int i = 0; i < dataset->n_samples; i++) {
-        ag_rewind(tape, graph_checkpoint);
-
-        AgVal input[2] = {
-            ag_leaf(tape, mt_dataset_feature(dataset, i, 0)),
-            ag_leaf(tape, mt_dataset_feature(dataset, i, 1))
-        };
-        AgVal pred[1];
-        AgVal target[1] = {
-            ag_leaf(tape, mt_dataset_label(dataset, i))
-        };
-
-        if (!demo_forward_binary(tape, model_choice, linear, mlp, input, pred)) {
-            return 0;
-        }
-
-        AgVal loss = mt_bce_loss(tape, pred, target, 1);
-        float prob = ag_data(tape, pred[0]);
-        int pred_class = prob >= 0.5f ? 1 : 0;
-        int truth = mt_dataset_label(dataset, i) >= 0.5f ? 1 : 0;
-
-        total_loss += ag_data(tape, loss);
-        if (pred_class == truth) {
-            correct++;
-        }
-    }
-
-    result->loss_mean = total_loss / (float)dataset->n_samples;
-    result->accuracy = (float)correct / (float)dataset->n_samples;
-    result->correct = correct;
-    result->total = dataset->n_samples;
-    ag_rewind(tape, graph_checkpoint);
-    return 1;
+    return output[0];
 }
 
 static void print_eval_result(const char* name, const MtEvalResult* result) {
@@ -655,36 +590,19 @@ static void demo_fake_dataset_pipeline(void) {
            test->n_samples);
 
     AgTape* tape = ag_tape_create();
-    MtLinear* linear = NULL;
-    MtLinear* hidden = NULL;
-    MtLinear* output = NULL;
-    MtSequential* mlp = NULL;
+    MtModel* model = NULL;
     MtOptimizer* optim = mt_adam_create(lr, 0.9f, 0.999f, 1e-8f);
 
     if (model_choice == 1) {
-        linear = mt_linear_create(tape, 2, 1, 1);
-        if (linear) mt_linear_init_xavier_uniform(tape, linear);
+        model = mt_model_create_linear_binary(tape, 2);
     } else {
-        hidden = mt_linear_create(tape, 2, 4, 1);
-        output = mt_linear_create(tape, 4, 1, 1);
-        mlp = mt_sequential_create(4);
-        if (hidden && output && mlp) {
-            mt_linear_init_xavier_uniform(tape, hidden);
-            mt_linear_init_xavier_uniform(tape, output);
-            mt_sequential_add_linear(mlp, hidden);
-            mt_sequential_add_activation(mlp, MT_ACT_TANH);
-            mt_sequential_add_linear(mlp, output);
-            mt_sequential_add_activation(mlp, MT_ACT_SIGMOID);
-        }
+        model = mt_model_create_mlp_binary(tape, 2, 4);
     }
 
-    if (!tape || !optim || (model_choice == 1 && !linear) || (model_choice == 2 && (!hidden || !output || !mlp))) {
+    if (!tape || !optim || !model) {
         printf("Impossible de créer le modèle.\n");
         mt_optimizer_free(optim);
-        mt_sequential_free(mlp);
-        mt_linear_free(linear);
-        mt_linear_free(hidden);
-        mt_linear_free(output);
+        mt_model_free(model);
         ag_tape_free(tape);
         mt_dataset_free(train);
         mt_dataset_free(val);
@@ -694,41 +612,63 @@ static void demo_fake_dataset_pipeline(void) {
     }
 
     if (model_choice == 1) {
-        mt_optimizer_add_linear(optim, linear);
+        mt_optimizer_add_linear(optim, model->linear);
         printf("\nModèle choisi : Linear(2, 1) + Sigmoid\n");
     } else {
-        mt_optimizer_add_sequential(optim, mlp);
+        mt_optimizer_add_sequential(optim, model->seq);
         printf("\nModèle choisi : petit MLP\n");
     }
     int graph_checkpoint = ag_checkpoint(tape);
 
     if (model_choice == 1) {
         printf("Poids initiaux : w1=%.4f, w2=%.4f, b=%.4f\n",
-               ag_data(tape, mt_linear_weight(linear, 0, 0)),
-               ag_data(tape, mt_linear_weight(linear, 0, 1)),
-               ag_data(tape, mt_linear_bias(linear, 0)));
+               ag_data(tape, mt_linear_weight(model->linear, 0, 0)),
+               ag_data(tape, mt_linear_weight(model->linear, 0, 1)),
+               ag_data(tape, mt_linear_bias(model->linear, 0)));
     }
 
-    demo_dataset_train(tape, model_choice, linear, mlp, optim, graph_checkpoint, train, epochs, batch_size);
+    MtLoss loss = mt_loss_create(MT_LOSS_BCE);
+    MtTrainConfig train_config = mt_train_config_default();
+    train_config.epochs = epochs;
+    train_config.batch_size = batch_size;
+    train_config.shuffle = 1;
+
+    MtTrainHistory history;
+    printf("\nEntraînement sur train\n");
+    if (!mt_trainer_train_binary(tape, model, optim, &loss, graph_checkpoint, train, &train_config, &history)) {
+        printf("Entraînement échoué.\n");
+        mt_optimizer_free(optim);
+        mt_model_free(model);
+        ag_tape_free(tape);
+        mt_dataset_free(train);
+        mt_dataset_free(val);
+        mt_dataset_free(test);
+        mt_dataset_free(dataset);
+        return;
+    }
+    printf("Terminé : %d époques, %d batches, perte finale %.6f\n",
+           history.epochs_ran,
+           history.batches_seen,
+           history.last_loss);
 
     if (model_choice == 1) {
         printf("\nPoids entraînés : w1=%.4f, w2=%.4f, b=%.4f\n",
-               ag_data(tape, mt_linear_weight(linear, 0, 0)),
-               ag_data(tape, mt_linear_weight(linear, 0, 1)),
-               ag_data(tape, mt_linear_bias(linear, 0)));
+               ag_data(tape, mt_linear_weight(model->linear, 0, 0)),
+               ag_data(tape, mt_linear_weight(model->linear, 0, 1)),
+               ag_data(tape, mt_linear_bias(model->linear, 0)));
     }
 
     MtEvalResult train_eval;
     MtEvalResult val_eval;
     MtEvalResult test_eval;
     printf("\nÉvaluation\n");
-    if (demo_dataset_eval(tape, model_choice, linear, mlp, graph_checkpoint, train, &train_eval)) {
+    if (mt_model_eval_binary(tape, model, graph_checkpoint, train, 0.5f, &train_eval)) {
         print_eval_result("Train", &train_eval);
     }
-    if (val && demo_dataset_eval(tape, model_choice, linear, mlp, graph_checkpoint, val, &val_eval)) {
+    if (val && mt_model_eval_binary(tape, model, graph_checkpoint, val, 0.5f, &val_eval)) {
         print_eval_result("Validation", &val_eval);
     }
-    if (demo_dataset_eval(tape, model_choice, linear, mlp, graph_checkpoint, test, &test_eval)) {
+    if (mt_model_eval_binary(tape, model, graph_checkpoint, test, 0.5f, &test_eval)) {
         print_eval_result("Test", &test_eval);
     }
 
@@ -736,7 +676,7 @@ static void demo_fake_dataset_pipeline(void) {
     printf("x1      x2      y vrai   proba    classe\n");
     printf("----------------------------------------\n");
     for (int i = 0; i < test->n_samples; i++) {
-        float prob = demo_dataset_predict_prob(tape, model_choice, linear, mlp, graph_checkpoint, test, i);
+        float prob = demo_dataset_predict_prob(tape, model, graph_checkpoint, test, i);
         int pred = prob >= 0.5f ? 1 : 0;
         printf("%-7.2f %-7.2f %-8.0f %-8.4f %d\n",
                mt_dataset_feature(test, i, 0),
@@ -747,12 +687,14 @@ static void demo_fake_dataset_pipeline(void) {
     }
 
     printf("\nDataset utilisé : %s\n", path);
+    if (mt_model_save(tape, model, "dataset_pipeline_model.mt")) {
+        printf("Modèle sauvegardé : dataset_pipeline_model.mt\n");
+    } else {
+        printf("Sauvegarde du modèle échouée.\n");
+    }
 
     mt_optimizer_free(optim);
-    mt_sequential_free(mlp);
-    mt_linear_free(linear);
-    mt_linear_free(hidden);
-    mt_linear_free(output);
+    mt_model_free(model);
     ag_tape_free(tape);
     mt_dataset_free(train);
     mt_dataset_free(val);

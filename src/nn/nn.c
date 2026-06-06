@@ -1,7 +1,9 @@
 #include "minitorch/nn/nn.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static float mt_randf(float lo, float hi) {
     return lo + (hi - lo) * ((float)rand() / (float)RAND_MAX);
@@ -426,6 +428,31 @@ AgVal mt_cross_entropy_from_logits(AgTape *t, const AgVal *logits, const AgVal *
     return ag_sub(t, log_sum_exp, target_logit);
 }
 
+MtLoss mt_loss_create(MtLossKind kind) {
+    MtLoss loss;
+    loss.kind = kind;
+    return loss;
+}
+
+AgVal mt_loss_forward(AgTape *t, const MtLoss *loss, const AgVal *pred, const AgVal *target, int n) {
+    if (!t || !loss || !pred || !target || n <= 0) {
+        return -1;
+    }
+
+    switch (loss->kind) {
+        case MT_LOSS_MSE:
+            return mt_mse_loss(t, pred, target, n);
+        case MT_LOSS_BCE:
+            return mt_bce_loss(t, pred, target, n);
+        case MT_LOSS_CROSS_ENTROPY:
+            return mt_cross_entropy_loss(t, pred, target, n);
+        case MT_LOSS_CROSS_ENTROPY_FROM_LOGITS:
+            return mt_cross_entropy_from_logits(t, pred, target, n);
+        default:
+            return -1;
+    }
+}
+
 int mt_argmax_values(const float *values, int n) {
     if (!values || n <= 0) {
         return -1;
@@ -630,4 +657,383 @@ int mt_eval_multiclass_linear(AgTape *t,
     result->total = dataset->n_samples;
     ag_rewind(t, graph_checkpoint);
     return 1;
+}
+
+static int mt_model_max_int(int a, int b) {
+    return a > b ? a : b;
+}
+
+MtModel *mt_model_create_linear_binary(AgTape *t, int input_size) {
+    if (!t || input_size <= 0) {
+        return NULL;
+    }
+
+    MtModel *model = (MtModel *)calloc(1, sizeof(MtModel));
+    if (!model) {
+        return NULL;
+    }
+
+    model->kind = MT_MODEL_LINEAR_BINARY;
+    model->input_size = input_size;
+    model->hidden_size = 0;
+    model->output_size = 1;
+    model->linear = mt_linear_create(t, input_size, 1, 1);
+    if (!model->linear) {
+        mt_model_free(model);
+        return NULL;
+    }
+
+    mt_linear_init_xavier_uniform(t, model->linear);
+    return model;
+}
+
+MtModel *mt_model_create_mlp_binary(AgTape *t, int input_size, int hidden_size) {
+    if (!t || input_size <= 0 || hidden_size <= 0) {
+        return NULL;
+    }
+
+    MtModel *model = (MtModel *)calloc(1, sizeof(MtModel));
+    if (!model) {
+        return NULL;
+    }
+
+    model->kind = MT_MODEL_MLP_BINARY;
+    model->input_size = input_size;
+    model->hidden_size = hidden_size;
+    model->output_size = 1;
+    model->hidden = mt_linear_create(t, input_size, hidden_size, 1);
+    model->output = mt_linear_create(t, hidden_size, 1, 1);
+    model->seq = mt_sequential_create(mt_model_max_int(input_size, hidden_size));
+
+    if (!model->hidden || !model->output || !model->seq) {
+        mt_model_free(model);
+        return NULL;
+    }
+
+    mt_linear_init_xavier_uniform(t, model->hidden);
+    mt_linear_init_xavier_uniform(t, model->output);
+    if (!mt_sequential_add_linear(model->seq, model->hidden) ||
+        !mt_sequential_add_activation(model->seq, MT_ACT_TANH) ||
+        !mt_sequential_add_linear(model->seq, model->output) ||
+        !mt_sequential_add_activation(model->seq, MT_ACT_SIGMOID)) {
+        mt_model_free(model);
+        return NULL;
+    }
+
+    return model;
+}
+
+void mt_model_free(MtModel *model) {
+    if (!model) {
+        return;
+    }
+
+    mt_sequential_free(model->seq);
+    mt_linear_free(model->linear);
+    mt_linear_free(model->hidden);
+    mt_linear_free(model->output);
+    free(model);
+}
+
+int mt_model_forward(AgTape *t,
+                     const MtModel *model,
+                     const AgVal *input,
+                     int input_size,
+                     AgVal *output,
+                     int output_size) {
+    if (!t || !model || !input || !output || input_size != model->input_size || output_size != model->output_size) {
+        return 0;
+    }
+
+    if (model->kind == MT_MODEL_LINEAR_BINARY) {
+        if (!model->linear || output_size != 1) {
+            return 0;
+        }
+        AgVal logits[1];
+        mt_linear_forward(t, model->linear, input, logits);
+        mt_sigmoid(t, logits, 1, output);
+        return 1;
+    }
+
+    if (model->kind == MT_MODEL_MLP_BINARY) {
+        return mt_sequential_forward(t, model->seq, input, input_size, output, output_size);
+    }
+
+    return 0;
+}
+
+int mt_model_eval_binary(AgTape *t,
+                         const MtModel *model,
+                         int graph_checkpoint,
+                         const MtDataset *dataset,
+                         float threshold,
+                         MtEvalResult *result) {
+    if (!t || !model || !dataset || !result || model->output_size != 1) {
+        return 0;
+    }
+    if (dataset->n_samples <= 0 || dataset->n_features != model->input_size) {
+        return 0;
+    }
+
+    AgVal *input = (AgVal *)malloc(sizeof(AgVal) * (size_t)model->input_size);
+    if (!input) {
+        return 0;
+    }
+
+    float total_loss = 0.0f;
+    int correct = 0;
+
+    for (int i = 0; i < dataset->n_samples; i++) {
+        ag_rewind(t, graph_checkpoint);
+
+        for (int f = 0; f < model->input_size; f++) {
+            input[f] = ag_leaf(t, mt_dataset_feature(dataset, i, f));
+        }
+
+        AgVal pred[1];
+        AgVal target[1] = {
+            ag_leaf(t, mt_dataset_label(dataset, i))
+        };
+
+        if (!mt_model_forward(t, model, input, model->input_size, pred, 1)) {
+            free(input);
+            ag_rewind(t, graph_checkpoint);
+            return 0;
+        }
+
+        AgVal loss = mt_bce_loss(t, pred, target, 1);
+        float prob = ag_data(t, pred[0]);
+        int pred_class = prob >= threshold ? 1 : 0;
+        int truth = mt_dataset_label(dataset, i) >= 0.5f ? 1 : 0;
+
+        total_loss += ag_data(t, loss);
+        if (pred_class == truth) {
+            correct++;
+        }
+    }
+
+    free(input);
+    result->loss_mean = total_loss / (float)dataset->n_samples;
+    result->accuracy = (float)correct / (float)dataset->n_samples;
+    result->correct = correct;
+    result->total = dataset->n_samples;
+    ag_rewind(t, graph_checkpoint);
+    return 1;
+}
+
+int mt_model_predict(AgTape *t,
+                     const MtModel *model,
+                     int graph_checkpoint,
+                     const float *features,
+                     float *output,
+                     int output_size) {
+    if (!t || !model || !features || !output || output_size != model->output_size) {
+        return 0;
+    }
+
+    AgVal *input = (AgVal *)malloc(sizeof(AgVal) * (size_t)model->input_size);
+    AgVal *pred = (AgVal *)malloc(sizeof(AgVal) * (size_t)output_size);
+    if (!input || !pred) {
+        free(input);
+        free(pred);
+        return 0;
+    }
+
+    ag_rewind(t, graph_checkpoint);
+    for (int i = 0; i < model->input_size; i++) {
+        input[i] = ag_leaf(t, features[i]);
+    }
+
+    int ok = mt_model_forward(t, model, input, model->input_size, pred, output_size);
+    if (ok) {
+        for (int i = 0; i < output_size; i++) {
+            output[i] = ag_data(t, pred[i]);
+        }
+    }
+
+    free(input);
+    free(pred);
+    ag_rewind(t, graph_checkpoint);
+    return ok;
+}
+
+int mt_model_predict_dataset(AgTape *t,
+                             const MtModel *model,
+                             int graph_checkpoint,
+                             const MtDataset *dataset,
+                             float *outputs,
+                             int output_size) {
+    if (!t || !model || !dataset || !outputs || output_size != model->output_size) {
+        return 0;
+    }
+    if (dataset->n_samples <= 0 || dataset->n_features != model->input_size) {
+        return 0;
+    }
+
+    float *features = (float *)malloc(sizeof(float) * (size_t)dataset->n_features);
+    if (!features) {
+        return 0;
+    }
+
+    for (int sample = 0; sample < dataset->n_samples; sample++) {
+        for (int feature = 0; feature < dataset->n_features; feature++) {
+            features[feature] = mt_dataset_feature(dataset, sample, feature);
+        }
+        if (!mt_model_predict(t, model, graph_checkpoint, features, &outputs[sample * output_size], output_size)) {
+            free(features);
+            return 0;
+        }
+    }
+
+    free(features);
+    return 1;
+}
+
+static int mt_model_save_linear_block(FILE *file, const AgTape *t, const MtLinear *layer) {
+    if (!file || !t || !layer) {
+        return 0;
+    }
+
+    fprintf(file, "LINEAR %d %d %d\n", layer->in_features, layer->out_features, layer->use_bias);
+    fprintf(file, "WEIGHTS %d\n", layer->in_features * layer->out_features);
+    for (int out_idx = 0; out_idx < layer->out_features; out_idx++) {
+        for (int in_idx = 0; in_idx < layer->in_features; in_idx++) {
+            fprintf(file, "%.9g\n", ag_data(t, mt_linear_weight(layer, out_idx, in_idx)));
+        }
+    }
+
+    fprintf(file, "BIAS %d\n", layer->use_bias ? layer->out_features : 0);
+    if (layer->use_bias) {
+        for (int out_idx = 0; out_idx < layer->out_features; out_idx++) {
+            fprintf(file, "%.9g\n", ag_data(t, mt_linear_bias(layer, out_idx)));
+        }
+    }
+    fprintf(file, "END_LINEAR\n");
+    return ferror(file) == 0;
+}
+
+static int mt_model_load_linear_block(FILE *file, AgTape *t, MtLinear *layer) {
+    if (!file || !t || !layer) {
+        return 0;
+    }
+
+    char token[32];
+    int in_features = 0;
+    int out_features = 0;
+    int use_bias = 0;
+    int count = 0;
+    float value = 0.0f;
+
+    if (fscanf(file, "%31s %d %d %d", token, &in_features, &out_features, &use_bias) != 4 ||
+        strcmp(token, "LINEAR") != 0 ||
+        in_features != layer->in_features ||
+        out_features != layer->out_features ||
+        use_bias != layer->use_bias) {
+        return 0;
+    }
+
+    if (fscanf(file, "%31s %d", token, &count) != 2 ||
+        strcmp(token, "WEIGHTS") != 0 ||
+        count != layer->in_features * layer->out_features) {
+        return 0;
+    }
+
+    for (int out_idx = 0; out_idx < layer->out_features; out_idx++) {
+        for (int in_idx = 0; in_idx < layer->in_features; in_idx++) {
+            if (fscanf(file, "%f", &value) != 1) {
+                return 0;
+            }
+            mt_linear_set_weight(t, layer, out_idx, in_idx, value);
+        }
+    }
+
+    if (fscanf(file, "%31s %d", token, &count) != 2 ||
+        strcmp(token, "BIAS") != 0 ||
+        count != (layer->use_bias ? layer->out_features : 0)) {
+        return 0;
+    }
+
+    if (layer->use_bias) {
+        for (int out_idx = 0; out_idx < layer->out_features; out_idx++) {
+            if (fscanf(file, "%f", &value) != 1) {
+                return 0;
+            }
+            mt_linear_set_bias(t, layer, out_idx, value);
+        }
+    }
+
+    return fscanf(file, "%31s", token) == 1 && strcmp(token, "END_LINEAR") == 0;
+}
+
+int mt_model_save(const AgTape *t, const MtModel *model, const char *path) {
+    if (!t || !model || !path) {
+        return 0;
+    }
+
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        return 0;
+    }
+
+    fprintf(file, "MINITORCH_MODEL_V1 %d %d %d %d\n",
+            (int)model->kind,
+            model->input_size,
+            model->hidden_size,
+            model->output_size);
+
+    int ok = 0;
+    if (model->kind == MT_MODEL_LINEAR_BINARY) {
+        ok = mt_model_save_linear_block(file, t, model->linear);
+    } else if (model->kind == MT_MODEL_MLP_BINARY) {
+        ok = mt_model_save_linear_block(file, t, model->hidden) &&
+             mt_model_save_linear_block(file, t, model->output);
+    }
+
+    if (ok) {
+        fprintf(file, "END_MODEL\n");
+        ok = ferror(file) == 0;
+    }
+
+    fclose(file);
+    return ok;
+}
+
+int mt_model_load(AgTape *t, MtModel *model, const char *path) {
+    if (!t || !model || !path) {
+        return 0;
+    }
+
+    FILE *file = fopen(path, "r");
+    if (!file) {
+        return 0;
+    }
+
+    char token[32];
+    int kind = -1;
+    int input_size = 0;
+    int hidden_size = 0;
+    int output_size = 0;
+
+    int ok = fscanf(file, "%31s %d %d %d %d", token, &kind, &input_size, &hidden_size, &output_size) == 5 &&
+             strcmp(token, "MINITORCH_MODEL_V1") == 0 &&
+             kind == (int)model->kind &&
+             input_size == model->input_size &&
+             hidden_size == model->hidden_size &&
+             output_size == model->output_size;
+
+    if (ok && model->kind == MT_MODEL_LINEAR_BINARY) {
+        ok = mt_model_load_linear_block(file, t, model->linear);
+    } else if (ok && model->kind == MT_MODEL_MLP_BINARY) {
+        ok = mt_model_load_linear_block(file, t, model->hidden) &&
+             mt_model_load_linear_block(file, t, model->output);
+    } else {
+        ok = 0;
+    }
+
+    if (ok) {
+        ok = fscanf(file, "%31s", token) == 1 && strcmp(token, "END_MODEL") == 0;
+    }
+
+    fclose(file);
+    return ok;
 }

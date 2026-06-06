@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include "minitorch/core/autograd.h"
 #include "minitorch/nn/nn.h"
+#include "minitorch/optim/optim.h"
+#include "minitorch/train/trainer.h"
 
 static int _passed = 0;
 static int _failed = 0;
@@ -313,6 +315,147 @@ static void test_eval_multiclass_linear(void) {
     ag_tape_free(t);
 }
 
+static void test_model_linear_binary_eval(void) {
+    section("MtModel : Linear binaire + évaluation");
+
+    float x[2] = {0.0f, 1.0f};
+    float y[2] = {0.0f, 1.0f};
+
+    AgTape *t = ag_tape_create();
+    MtDataset *dataset = mt_dataset_create(x, y, 2, 1);
+    MtModel *model = mt_model_create_linear_binary(t, 1);
+
+    mt_linear_set_weight(t, model->linear, 0, 0, 10.0f);
+    mt_linear_set_bias(t, model->linear, 0, -5.0f);
+    int graph_checkpoint = ag_checkpoint(t);
+
+    MtEvalResult eval;
+    int ok = mt_model_eval_binary(t, model, graph_checkpoint, dataset, 0.5f, &eval);
+
+    CHECK("model eval accepte", (float)ok, 1.0f);
+    CHECK("model eval exactitude", eval.accuracy, 1.0f);
+    CHECK("model eval correct", (float)eval.correct, 2.0f);
+
+    mt_model_free(model);
+    mt_dataset_free(dataset);
+    ag_tape_free(t);
+}
+
+static void test_model_mlp_forward(void) {
+    section("MtModel : MLP forward");
+
+    AgTape *t = ag_tape_create();
+    MtModel *model = mt_model_create_mlp_binary(t, 2, 4);
+    AgVal input[2] = {
+        ag_leaf(t, 0.25f),
+        ag_leaf(t, -0.50f)
+    };
+    AgVal output[1];
+
+    int ok = mt_model_forward(t, model, input, 2, output, 1);
+    float prob = ag_data(t, output[0]);
+
+    CHECK("mlp forward accepte", (float)ok, 1.0f);
+    CHECK("mlp proba dans [0, 1]", (prob >= 0.0f && prob <= 1.0f) ? 1.0f : 0.0f, 1.0f);
+
+    mt_model_free(model);
+    ag_tape_free(t);
+}
+
+static void test_model_save_load_linear(void) {
+    section("MtModel : sauvegarde et chargement");
+
+    const char *path = "test_model_linear.mt";
+    AgTape *t = ag_tape_create();
+    MtModel *model = mt_model_create_linear_binary(t, 2);
+
+    mt_linear_set_weight(t, model->linear, 0, 0, 1.25f);
+    mt_linear_set_weight(t, model->linear, 0, 1, -0.75f);
+    mt_linear_set_bias(t, model->linear, 0, 0.50f);
+
+    int saved = mt_model_save(t, model, path);
+    mt_linear_set_weight(t, model->linear, 0, 0, 0.0f);
+    mt_linear_set_weight(t, model->linear, 0, 1, 0.0f);
+    mt_linear_set_bias(t, model->linear, 0, 0.0f);
+    int loaded = mt_model_load(t, model, path);
+
+    CHECK("model sauvegarde accepte", (float)saved, 1.0f);
+    CHECK("model chargement accepte", (float)loaded, 1.0f);
+    CHECK("model w0 restauré", ag_data(t, mt_linear_weight(model->linear, 0, 0)), 1.25f);
+    CHECK("model w1 restauré", ag_data(t, mt_linear_weight(model->linear, 0, 1)), -0.75f);
+    CHECK("model biais restauré", ag_data(t, mt_linear_bias(model->linear, 0)), 0.50f);
+
+    remove(path);
+    mt_model_free(model);
+    ag_tape_free(t);
+}
+
+static void test_loss_abstraction(void) {
+    section("MtLoss : abstraction");
+
+    AgTape *t = ag_tape_create();
+    MtLoss loss = mt_loss_create(MT_LOSS_BCE);
+    AgVal pred[1] = {ag_leaf(t, 0.5f)};
+    AgVal target[1] = {ag_leaf(t, 1.0f)};
+    AgVal value = mt_loss_forward(t, &loss, pred, target, 1);
+
+    CHECK("loss BCE via MtLoss", ag_data(t, value), -logf(0.5f + 1e-7f));
+
+    ag_tape_free(t);
+}
+
+static void test_model_predict_api(void) {
+    section("MtModel : predict");
+
+    AgTape *t = ag_tape_create();
+    MtModel *model = mt_model_create_linear_binary(t, 1);
+    mt_linear_set_weight(t, model->linear, 0, 0, 10.0f);
+    mt_linear_set_bias(t, model->linear, 0, -5.0f);
+    int graph_checkpoint = ag_checkpoint(t);
+
+    float features[1] = {1.0f};
+    float output[1] = {0.0f};
+    int ok = mt_model_predict(t, model, graph_checkpoint, features, output, 1);
+
+    CHECK("predict accepte", (float)ok, 1.0f);
+    CHECK("predict classe positive", output[0] > 0.5f ? 1.0f : 0.0f, 1.0f);
+
+    mt_model_free(model);
+    ag_tape_free(t);
+}
+
+static void test_trainer_binary_api(void) {
+    section("MtTrainer : entraînement binaire");
+
+    float x[4] = {0.0f, 1.0f, 2.0f, 3.0f};
+    float y[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+
+    AgTape *t = ag_tape_create();
+    MtDataset *dataset = mt_dataset_create(x, y, 4, 1);
+    MtModel *model = mt_model_create_linear_binary(t, 1);
+    MtOptimizer *optim = mt_sgd_create(0.05f);
+    mt_optimizer_add_linear(optim, model->linear);
+
+    int graph_checkpoint = ag_checkpoint(t);
+    MtLoss loss = mt_loss_create(MT_LOSS_BCE);
+    MtTrainConfig config = mt_train_config_default();
+    config.epochs = 2;
+    config.batch_size = 2;
+    config.shuffle = 0;
+
+    MtTrainHistory history;
+    int ok = mt_trainer_train_binary(t, model, optim, &loss, graph_checkpoint, dataset, &config, &history);
+
+    CHECK("trainer accepte", (float)ok, 1.0f);
+    CHECK("trainer époques", (float)history.epochs_ran, 2.0f);
+    CHECK("trainer samples vus", (float)history.samples_seen, 8.0f);
+
+    mt_optimizer_free(optim);
+    mt_model_free(model);
+    mt_dataset_free(dataset);
+    ag_tape_free(t);
+}
+
 int main(void) {
     printf("test_nn : suite complete\n");
 
@@ -328,6 +471,12 @@ int main(void) {
     test_metrics_confusion_matrix();
     test_eval_binary_linear();
     test_eval_multiclass_linear();
+    test_model_linear_binary_eval();
+    test_model_mlp_forward();
+    test_model_save_load_linear();
+    test_loss_abstraction();
+    test_model_predict_api();
+    test_trainer_binary_api();
 
     summary();
     return _failed == 0 ? 0 : 1;
